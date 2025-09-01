@@ -9,6 +9,7 @@ This README documents all of the tasks that are currently available in Judo.
 | [leap_cube](#leap-cube) | Rotate a cube to a target orientation using a LEAP hand. |
 | [leap_cube_down](#leap-cube-down) | Rotate a cube to a target orientation using a LEAP hand, but with the palm facing down. |
 | [caltech_leap_cube](#caltech-leap-cube) | Rotate a cube to a target orientation using a modified LEAP hand at Caltech. |
+| [particle](#particle) | Control a 2D point mass to reach a target position using velocity commands. |
 
 ## Cylinder Push
 The cylinder push task has the following weights:
@@ -120,3 +121,14 @@ This works the same way as the LEAP Cube task, but uses a modified LEAP hand mod
 > ⚠️ **Disclaimer** ⚠️
 >
 > This task is currently configured to use up to 32 threads by default (depending on the optimizer)! For many users, this is too many, and will be very slow. You can adjust this in the GUI or update the default value.
+
+## Particle
+The particle task has the following weights:
+
+| Weight | Description |
+| ------ | ----------- |
+| `w_position` | Penalizes the distance between the particle and the target position. |
+| `w_velocity` | Penalizes the squared velocity of the particle. |
+| `w_control` | Penalizes the amount of control effort applied. |
+
+This task controls a 2D point mass to reach a target position (green sphere) using velocity commands. The particle starts near the origin and must navigate to the target while avoiding the boundary walls.
