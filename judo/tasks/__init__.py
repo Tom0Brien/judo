@@ -10,6 +10,7 @@ from judo.tasks.fr3_pick import FR3Pick, FR3PickConfig
 from judo.tasks.leap_cube import LeapCube, LeapCubeConfig
 from judo.tasks.leap_cube_down import LeapCubeDown, LeapCubeDownConfig
 from judo.tasks.particle import Particle, ParticleConfig
+from judo.tasks.pusht import Pusht, PushtConfig
 
 _registered_tasks: Dict[str, Tuple[Type[Task], Type[TaskConfig]]] = {
     "cylinder_push": (CylinderPush, CylinderPushConfig),
@@ -19,6 +20,7 @@ _registered_tasks: Dict[str, Tuple[Type[Task], Type[TaskConfig]]] = {
     "leap_cube_down": (LeapCubeDown, LeapCubeDownConfig),
     "caltech_leap_cube": (CaltechLeapCube, CaltechLeapCubeConfig),
     "particle": (Particle, ParticleConfig),
+    "pusht": (Pusht, PushtConfig),
 }
 
 

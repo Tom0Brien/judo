@@ -10,6 +10,7 @@ This README documents all of the tasks that are currently available in Judo.
 | [leap_cube_down](#leap-cube-down) | Rotate a cube to a target orientation using a LEAP hand, but with the palm facing down. |
 | [caltech_leap_cube](#caltech-leap-cube) | Rotate a cube to a target orientation using a modified LEAP hand at Caltech. |
 | [particle](#particle) | Control a 2D point mass to reach a target position using velocity commands. |
+| [pusht](#pusht) | Push a T-shaped block to a target position and orientation using a pusher sphere. |
 
 ## Cylinder Push
 The cylinder push task has the following weights:
@@ -132,3 +133,14 @@ The particle task has the following weights:
 | `w_control` | Penalizes the amount of control effort applied. |
 
 This task controls a 2D point mass to reach a target position (green sphere) using velocity commands. The particle starts near the origin and must navigate to the target while avoiding the boundary walls.
+
+## Pusht
+The pusht task has the following weights:
+
+| Weight | Description |
+| ------ | ----------- |
+| `w_position` | Penalizes the position error between the T-shaped block and the target position. |
+| `w_orientation` | Penalizes the orientation error between the T-shaped block and the target orientation. |
+| `w_proximity` | Penalizes the distance between the pusher sphere and the T-shaped block. |
+
+This task requires pushing a T-shaped block (blue) to match a target pose (green) using a red pusher sphere. The pusher can move in 2D and must strategically position itself to manipulate the block's position and orientation.
