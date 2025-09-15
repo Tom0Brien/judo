@@ -208,19 +208,18 @@ class TunerNode(DoraNode):
         std_plan_time = np.std(self.current_plan_times)
 
         # compute reward metrics if trajectory data is available
-        mean_reward = 0.0
+        cumulative_reward = -1e12
         if self.trajectory_states and self.objective in ["reward", "combined"]:
             cumulative_reward = self.compute_cumulative_reward()
-            mean_reward = cumulative_reward
 
         # compute objective value based on selected objective
         if self.objective == "plan_time":
             objective_value = mean_plan_time
         elif self.objective == "reward":
-            objective_value = -mean_reward  # negative because optuna minimizes
+            objective_value = -cumulative_reward  # negative because optuna minimizes
         elif self.objective == "combined":
             # normalize both metrics and combine
-            objective_value = self.plan_time_weight * mean_plan_time - self.reward_weight * mean_reward
+            objective_value = self.plan_time_weight * mean_plan_time - self.reward_weight * cumulative_reward
         else:
             raise ValueError(f"Unknown objective: {self.objective}")
 
@@ -231,7 +230,7 @@ class TunerNode(DoraNode):
         print(f"Trial {len(self.study.trials)} completed:")
         print(f"  Plan time: {mean_plan_time:.4f}s ± {std_plan_time:.4f}s")
         if self.objective in ["reward", "combined"]:
-            print(f"  Cumulative reward: {mean_reward:.4f}")
+            print(f"  Cumulative reward: {cumulative_reward:.4f}")
         print(f"  Objective value: {objective_value:.4f}")
 
         # start next trial
