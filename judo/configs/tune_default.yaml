@@ -63,13 +63,12 @@ node_definitions:
     _target_: judo.app.tune.TunerNode
     node_id: tuner
     max_workers: null
-    n_trials: 50
-    n_samples_per_trial: 20
-    target_task: cylinder_push
-    target_optimizer: mppi
+    n_trials: 2
+    n_samples_per_trial: 10
+    target_tasks: [particle, cartpole, pusht, leap_cube, fr3_pick]
+    target_optimizers: [ps, mppi, cem]
     objective: multiobjective  # "plan_time", "reward", or "multiobjective"
-    reward_weight: 1.0
-    plan_time_weight: 1.0
     trial_duration: 10.0
     study_name: null
     storage: null
+    results_dir: tune_results  # Directory to save results

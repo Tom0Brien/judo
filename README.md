@@ -124,6 +124,15 @@ This will loop through all task/optimizer pairs and check the planning time over
 
 Note that the benchmarking program runs the default task and optimizer parameters (subject to default task-specific overrides). If you want to benchmark with different settings, please read the information below, which explains how to change defaults.
 
+## 5. Multi-Pair Hyperparameter Tuning
+`judo` supports automated hyperparameter tuning across multiple task-optimizer combinations using Optuna. This allows you to systematically optimize parameters for different scenarios and compare performance across tasks and optimizers.
+
+### Basic Usage
+Run hyperparameter tuning :
+```bash
+tune
+```
+
 # Docs
 For developers, to build docs locally, run the following in your environment from the repo root. Note that asset paths will be broken locally that work correctly on Github Pages.
 ```bash

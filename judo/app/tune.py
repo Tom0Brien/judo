@@ -1,7 +1,10 @@
 # Copyright (c) 2025 Robotics and AI Institute LLC. All rights reserved.
 
+import json
 import sys
-from typing import Any, Dict, Literal
+from collections import deque
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Union
 
 import numpy as np
 import optuna
@@ -29,14 +32,13 @@ class TunerNode(DoraNode):
         max_workers: int | None = None,
         n_trials: int = 50,
         n_samples_per_trial: int = 20,
-        target_task: str = "cylinder_push",
-        target_optimizer: str = "mppi",
+        target_tasks: Union[str, List[str]] = "cylinder_push",
+        target_optimizers: Union[str, List[str]] = "mppi",
         objective: Literal["plan_time", "reward", "multiobjective"] = "plan_time",
-        reward_weight: float = 1.0,
-        plan_time_weight: float = 1.0,
         trial_duration: float = 10.0,
         study_name: str | None = None,
         storage: str | None = None,
+        results_dir: str = "tune_results",
     ) -> None:
         """Initialize the optimizer node."""
         super().__init__(node_id=node_id, max_workers=max_workers)
@@ -45,20 +47,43 @@ class TunerNode(DoraNode):
         self.available_optimizers = get_registered_optimizers()
         self.available_tasks = get_registered_tasks()
 
-        # validate target task and optimizer
-        if target_task not in self.available_tasks:
-            raise ValueError(f"Task '{target_task}' not found in registered tasks")
-        if target_optimizer not in self.available_optimizers:
-            raise ValueError(f"Optimizer '{target_optimizer}' not found in registered optimizers")
+        # convert single items to lists
+        if isinstance(target_tasks, str):
+            target_tasks = [target_tasks]
+        if isinstance(target_optimizers, str):
+            target_optimizers = [target_optimizers]
 
-        self.target_task = target_task
-        self.target_optimizer = target_optimizer
+        # validate target tasks and optimizers
+        for task in target_tasks:
+            if task not in self.available_tasks:
+                raise ValueError(f"Task '{task}' not found in registered tasks")
+        for optimizer in target_optimizers:
+            if optimizer not in self.available_optimizers:
+                raise ValueError(f"Optimizer '{optimizer}' not found in registered optimizers")
+
+        # create task-optimizer pairs queue
+        self.task_optimizer_pairs = deque(
+            [(task, optimizer) for task in target_tasks for optimizer in target_optimizers]
+        )
+        self.total_pairs = len(self.task_optimizer_pairs)
+        self.current_pair_index = 0
+
+        # current task and optimizer (will be set when processing pairs)
+        self.target_task = None
+        self.target_optimizer = None
+
+        # tuning parameters
         self.n_trials = n_trials
         self.n_samples_per_trial = n_samples_per_trial
         self.objective = objective
-        self.reward_weight = reward_weight
-        self.plan_time_weight = plan_time_weight
         self.trial_duration = trial_duration
+        self.base_study_name = study_name
+        self.storage = storage
+
+        # results storage
+        self.results_dir = Path(results_dir)
+        self.results_dir.mkdir(exist_ok=True)
+        self.all_results = {}
 
         # trial tracking
         self.current_trial = None
@@ -73,45 +98,97 @@ class TunerNode(DoraNode):
         self.trajectory_times = []
         self.current_rewards = []
 
-        # optuna study
-        if objective == "multiobjective":
-            # Multi-objective: minimize plan_time, maximize reward
-            self.study = optuna.create_study(
-                directions=["minimize", "maximize"],
-                study_name=study_name or f"optimize_{target_task}_{target_optimizer}_multiobjective",
-                storage=storage,
-                load_if_exists=True,
-            )
-        else:
-            # Single objective
-            self.study = optuna.create_study(
-                direction="minimize",
-                study_name=study_name or f"optimize_{target_task}_{target_optimizer}",
-                storage=storage,
-                load_if_exists=True,
-            )
+        # reset state shape tracking for new pair
+        self.expected_state_shape = None
+        self.shape_changes_logged = False
+
+        # optuna study (will be created for each task-optimizer pair)
+        self.study = None
 
         # console for printing
         self.console = Console()
 
-        print(f"Starting hyperparameter tuning for {target_task} + {target_optimizer}!")
-        print(f"Target: {n_trials} trials with {n_samples_per_trial} samples each")
+        print(f"Starting hyperparameter tuning for {len(self.task_optimizer_pairs)} task-optimizer pairs!")
+        print(f"Pairs to process: {[(task, opt) for task, opt in self.task_optimizer_pairs]}")
+        print(f"Target: {n_trials} trials with {n_samples_per_trial} samples each per pair")
         if objective == "multiobjective":
             print("Mode: Multi-objective optimization (plan_time vs reward)")
         else:
             print(f"Mode: Single-objective optimization ({objective})")
 
-        # set initial task and optimizer
+        # start processing the first pair
+        self.start_next_pair()
+
+    def start_next_pair(self) -> None:
+        """Start processing the next task-optimizer pair."""
+        if not self.task_optimizer_pairs:
+            # All pairs completed
+            self.print_final_results()
+            sys.exit(0)
+
+        # get next pair
+        self.target_task, self.target_optimizer = self.task_optimizer_pairs.popleft()
+        self.current_pair_index += 1
+
+        print(f"\n{'=' * 60}")
+        print(
+            f"Processing pair {self.current_pair_index}/{self.total_pairs}: {self.target_task} + {self.target_optimizer}"
+        )
+        print(f"{'=' * 60}")
+
+        # create new study for this pair
+        study_name = self.base_study_name or f"optimize_{self.target_task}_{self.target_optimizer}"
+        if self.objective == "multiobjective":
+            study_name += "_multiobjective"
+            self.study = optuna.create_study(
+                directions=["minimize", "maximize"],
+                study_name=study_name,
+                storage=self.storage,
+                load_if_exists=True,
+            )
+        else:
+            self.study = optuna.create_study(
+                direction="minimize",
+                study_name=study_name,
+                storage=self.storage,
+                load_if_exists=True,
+            )
+
+        # reset trial tracking for new pair
+        self.current_trial = None
+        self.current_plan_times = []
+        self.samples_collected = 0
+
+        # reset trajectory tracking
+        self.trial_start_time = None
+        self.trajectory_states = []
+        self.trajectory_sensors = []
+        self.trajectory_controls = []
+        self.trajectory_times = []
+        self.current_rewards = []
+
+        # reset shape change logging for this trial (but keep expected_state_shape)
+        self.shape_changes_logged = False
+
+        # send new task and optimizer to pipeline
         self.node.send_output("task", pa.array([self.target_task]))
         self.node.send_output("optimizer", pa.array([self.target_optimizer]))
 
+        # send task reset to ensure clean state for new pair
+        self.node.send_output("task_reset", pa.array([True]))
+
+        print(f"Starting trials for {self.target_task} + {self.target_optimizer}")
+
+        # start first trial for this pair
         self.start_next_trial()
 
     def start_next_trial(self) -> None:
-        """Start the next tuning trial."""
+        """Start the next tuning trial for the current task-optimizer pair."""
         if len(self.study.trials) >= self.n_trials:
-            self.print_results()
-            sys.exit(0)
+            # Current pair completed, save results and move to next pair
+            self.save_pair_results()
+            self.start_next_pair()
+            return
 
         # create new trial
         self.current_trial = self.study.ask()
@@ -195,11 +272,48 @@ class TunerNode(DoraNode):
         if self.trial_start_time is None:
             self.trial_start_time = state_msg.time
 
-        # collect trajectory data
-        self.trajectory_times.append(state_msg.time)
-        self.trajectory_states.append(np.concatenate([state_msg.qpos, state_msg.qvel]))
-        self.trajectory_sensors.append(state_msg.sensordata.copy())
-        self.trajectory_controls.append(state_msg.ctrl.copy())
+        # collect trajectory data with shape validation
+        try:
+            state_vector = np.concatenate([state_msg.qpos, state_msg.qvel])
+            current_shape = len(state_vector)
+
+            # handle shape initialization and changes
+            if self.expected_state_shape is None:
+                # First state in this task-optimizer pair
+                self.expected_state_shape = current_shape
+                print(f"Initialized state shape for {self.target_task} + {self.target_optimizer}: {current_shape}")
+            elif current_shape != self.expected_state_shape:
+                # Shape mismatch detected
+                if not self.shape_changes_logged:
+                    print(f"State shape change detected in {self.target_task} + {self.target_optimizer}:")
+                    print(f"  Expected: {self.expected_state_shape}, Got: {current_shape}")
+                    print(f"  qpos: {len(state_msg.qpos)}, qvel: {len(state_msg.qvel)}")
+                    self.shape_changes_logged = True
+
+                # If we're early in the trial (first few states), reset and adapt
+                if len(self.trajectory_states) < 5:
+                    print(f"  Early in trial - adapting to new shape: {current_shape}")
+                    self.expected_state_shape = current_shape
+                    self.trajectory_times = [state_msg.time]
+                    self.trajectory_states = [state_vector]
+                    self.trajectory_sensors = [state_msg.sensordata.copy()]
+                    self.trajectory_controls = [state_msg.ctrl.copy()]
+                    self.trial_start_time = state_msg.time
+                    return
+                else:
+                    # Late in trial - skip this state to maintain consistency
+                    return
+
+            # Normal trajectory collection
+            self.trajectory_times.append(state_msg.time)
+            self.trajectory_states.append(state_vector)
+            self.trajectory_sensors.append(state_msg.sensordata.copy())
+            self.trajectory_controls.append(state_msg.ctrl.copy())
+
+        except Exception as e:
+            print(f"Error collecting trajectory data: {e}")
+            print(f"qpos shape: {state_msg.qpos.shape}, qvel shape: {state_msg.qvel.shape}")
+            return
 
     @on_event("INPUT", "plan_time")
     def on_plan_time(self, event: dict) -> None:
@@ -219,6 +333,8 @@ class TunerNode(DoraNode):
     def complete_trial(self) -> None:
         """Complete the current trial and report the objective value."""
         if not self.current_plan_times:
+            print("Warning: No plan times collected for trial. Skipping trial completion.")
+            self.start_next_trial()
             return
 
         # compute plan time metrics
@@ -226,36 +342,119 @@ class TunerNode(DoraNode):
         std_plan_time = np.std(self.current_plan_times)
 
         # compute reward metrics if trajectory data is available
-        cumulative_reward = -1e12
+        cumulative_reward = -1e12  # default fallback value
+        reward_computed_successfully = False
+
         if self.trajectory_states and self.objective in ["reward", "multiobjective"]:
-            cumulative_reward = self.compute_cumulative_reward()
+            try:
+                computed_reward = self.compute_cumulative_reward()
+                # Check if reward computation was successful (not the default 0.0 from error handling)
+                if computed_reward != 0.0 or len(self.trajectory_states) == 0:
+                    cumulative_reward = computed_reward
+                    reward_computed_successfully = True
+                else:
+                    print("Warning: Reward computation returned 0.0, using fallback strategy")
+                    # For failed reward computation, use a penalty based on plan time
+                    cumulative_reward = -mean_plan_time * 10  # penalty for failed reward computation
+            except Exception as e:
+                print(f"Error in complete_trial reward computation: {e}")
+                cumulative_reward = -mean_plan_time * 10  # penalty for failed reward computation
 
         # report to optuna based on objective type
-        if self.objective == "plan_time":
-            objective_value = mean_plan_time
-            self.study.tell(self.current_trial, objective_value)
-        elif self.objective == "reward":
-            objective_value = -cumulative_reward  # negative because optuna minimizes
-            self.study.tell(self.current_trial, objective_value)
-        elif self.objective == "multiobjective":
-            # Multi-objective: minimize plan_time, maximize reward
-            objectives = [mean_plan_time, cumulative_reward]
-            self.study.tell(self.current_trial, objectives)
-        else:
-            raise ValueError(f"Unknown objective: {self.objective}")
+        try:
+            if self.objective == "plan_time":
+                objective_value = mean_plan_time
+                self.study.tell(self.current_trial, objective_value)
+            elif self.objective == "reward":
+                if not reward_computed_successfully and cumulative_reward == -1e12:
+                    print("Warning: Skipping trial due to failed reward computation")
+                    self.start_next_trial()
+                    return
+                objective_value = -cumulative_reward  # negative because optuna minimizes
+                self.study.tell(self.current_trial, objective_value)
+            elif self.objective == "multiobjective":
+                if not reward_computed_successfully and cumulative_reward == -1e12:
+                    print("Warning: Using plan time only for multiobjective due to failed reward computation")
+                    cumulative_reward = -mean_plan_time * 10
+                # Multi-objective: minimize plan_time, maximize reward
+                objectives = [mean_plan_time, cumulative_reward]
+                self.study.tell(self.current_trial, objectives)
+            else:
+                raise ValueError(f"Unknown objective: {self.objective}")
+        except Exception as e:
+            print(f"Error reporting to Optuna: {e}")
+            self.start_next_trial()
+            return
 
         # print results
         print(f"Trial {len(self.study.trials)} completed:")
         print(f"  Plan time: {mean_plan_time:.4f}s ± {std_plan_time:.4f}s")
         if self.objective in ["reward", "multiobjective"]:
-            print(f"  Cumulative reward: {cumulative_reward:.4f}")
+            status = "✓" if reward_computed_successfully else "✗ (fallback)"
+            print(f"  Cumulative reward: {cumulative_reward:.4f} {status}")
         if self.objective == "multiobjective":
             print(f"  Objectives: [plan_time={mean_plan_time:.4f}s, reward={cumulative_reward:.4f}]")
         else:
+            # For single objectives, we have objective_value defined
+            if self.objective == "plan_time":
+                objective_value = mean_plan_time
+            elif self.objective == "reward":
+                objective_value = -cumulative_reward
             print(f"  Objective value: {objective_value:.4f}")
 
         # start next trial
         self.start_next_trial()
+
+    def save_pair_results(self) -> None:
+        """Save results for the current task-optimizer pair."""
+        pair_key = f"{self.target_task}_{self.target_optimizer}"
+
+        # extract best results
+        results = {
+            "task": self.target_task,
+            "optimizer": self.target_optimizer,
+            "objective": self.objective,
+            "n_trials": len(self.study.trials),
+            "completed_trials": len([t for t in self.study.trials if t.state == optuna.trial.TrialState.COMPLETE]),
+        }
+
+        if self.objective == "multiobjective":
+            # Multi-objective results
+            pareto_trials = self.study.best_trials
+            results["pareto_front_size"] = len(pareto_trials)
+            results["pareto_solutions"] = []
+            for trial in pareto_trials[:10]:  # Store top 10 Pareto solutions
+                if trial.values is not None:
+                    plan_time, reward = trial.values
+                    results["pareto_solutions"].append(
+                        {"plan_time": plan_time, "reward": reward, "parameters": trial.params}
+                    )
+        else:
+            # Single objective results
+            best_trial = self.study.best_trial
+            results["best_value"] = best_trial.value
+            results["best_parameters"] = best_trial.params
+
+            # parameter importance
+            try:
+                importance = optuna.importance.get_param_importances(self.study)
+                results["parameter_importance"] = importance
+            except Exception:
+                results["parameter_importance"] = {}
+
+        # save to all_results
+        self.all_results[pair_key] = results
+
+        # save individual pair results to file
+        pair_file = self.results_dir / f"{pair_key}_results.json"
+        with open(pair_file, "w") as f:
+            json.dump(results, f, indent=2)
+
+        print(f"Results saved for {self.target_task} + {self.target_optimizer}")
+        if self.objective == "multiobjective":
+            print(f"  Pareto front size: {len(pareto_trials)}")
+        else:
+            print(f"  Best value: {best_trial.value:.4f}")
 
     def compute_cumulative_reward(self) -> float:
         """Compute the cumulative reward for the current trajectory."""
@@ -268,88 +467,132 @@ class TunerNode(DoraNode):
         task = task_cls()
         task_config = task_config_cls()
 
-        # convert trajectory data to numpy arrays
-        states = np.array(self.trajectory_states)  # shape: (T, nq+nv)
-        sensors = np.array(self.trajectory_sensors)  # shape: (T, nsensordata)
-        controls = np.array(self.trajectory_controls)  # shape: (T, nu)
+        try:
+            # convert trajectory data to numpy arrays with error handling
+            states = np.array(self.trajectory_states)  # shape: (T, nq+nv)
+            sensors = np.array(self.trajectory_sensors)  # shape: (T, nsensordata)
+            controls = np.array(self.trajectory_controls)  # shape: (T, nu)
 
-        # reshape for task reward function: (1, T, dim) for single rollout
-        states_batch = states[None, :, :]  # (1, T, nq+nv)
-        sensors_batch = sensors[None, :, :]  # (1, T, nsensordata)
-        controls_batch = controls[None, :, :]  # (1, T, nu)
+            # validate array shapes
+            if len(states.shape) != 2 or len(sensors.shape) != 2 or len(controls.shape) != 2:
+                print(
+                    f"Warning: Invalid trajectory array shapes. States: {states.shape}, Sensors: {sensors.shape}, Controls: {controls.shape}"
+                )
+                return 0.0
 
-        # compute rewards using task's reward function
-        rewards = task.reward(states_batch, sensors_batch, controls_batch, task_config)
+            # reshape for task reward function: (1, T, dim) for single rollout
+            states_batch = states[None, :, :]  # (1, T, nq+nv)
+            sensors_batch = sensors[None, :, :]  # (1, T, nsensordata)
+            controls_batch = controls[None, :, :]  # (1, T, nu)
 
-        # return the cumulative reward (single rollout)
-        return float(rewards[0]) if len(rewards) > 0 else 0.0
+            # compute rewards using task's reward function
+            rewards = task.reward(states_batch, sensors_batch, controls_batch, task_config)
 
-    def print_results(self) -> None:
-        """Print the tuning results."""
-        self.console.print("\n[bold green]Hyperparameter Tuning Complete![/bold green]")
+            # return the cumulative reward (single rollout)
+            return float(rewards[0]) if len(rewards) > 0 else 0.0
 
-        if not self.study.trials:
-            print("No trials completed.")
+        except ValueError as e:
+            print(f"Error computing trajectory reward: {e}")
+            print(
+                f"Trajectory lengths - States: {len(self.trajectory_states)}, Sensors: {len(self.trajectory_sensors)}, Controls: {len(self.trajectory_controls)}"
+            )
+            if self.trajectory_states:
+                state_shapes = [len(s) for s in self.trajectory_states[:5]]  # Show first 5 shapes
+                print(f"State vector shapes (first 5): {state_shapes}")
+            return 0.0
+        except Exception as e:
+            print(f"Unexpected error computing reward: {e}")
+            return 0.0
+
+    def print_final_results(self) -> None:
+        """Print the final tuning results for all task-optimizer pairs."""
+        self.console.print("\n[bold green]Multi-Pair Hyperparameter Tuning Complete![/bold green]")
+
+        if not self.all_results:
+            print("No results available.")
             return
 
-        # print best trial(s)
-        if self.objective == "multiobjective":
-            # For multi-objective, show Pareto front
-            pareto_trials = self.study.best_trials
-            self.console.print(f"[bold]Pareto Front ({len(pareto_trials)} solutions):[/bold]")
-            for i, trial in enumerate(pareto_trials[:5]):  # Show top 5 Pareto solutions
-                plan_time, reward = trial.values
-                self.console.print(f"  Solution {i + 1}: plan_time={plan_time:.4f}s, reward={reward:.4f}")
-                self.console.print("    Parameters:")
-                for key, value in trial.params.items():
-                    self.console.print(f"      {key}: {value}")
-                self.console.print("")
-            if len(pareto_trials) > 5:
-                self.console.print(f"  ... and {len(pareto_trials) - 5} more solutions")
-        else:
-            # Single objective - show best trial
-            best_trial = self.study.best_trial
-            self.console.print("[bold]Best Trial:[/bold]")
-            if self.objective == "plan_time":
-                self.console.print(f"  Best plan time: {best_trial.value:.4f}s")
-            elif self.objective == "reward":
-                self.console.print(f"  Best cumulative reward: {-best_trial.value:.4f}")
-            self.console.print("  Parameters:")
-            for key, value in best_trial.params.items():
-                self.console.print(f"    {key}: {value}")
+        # save combined results
+        combined_file = self.results_dir / "combined_results.json"
+        with open(combined_file, "w") as f:
+            json.dump(self.all_results, f, indent=2)
 
-        # print tuning history
-        self.console.print("\n[bold]Tuning History:[/bold]")
-        for i, trial in enumerate(self.study.trials):
-            status = "✓" if trial.state == optuna.trial.TrialState.COMPLETE else "✗"
+        # print summary for each pair
+        self.console.print(f"\n[bold]Results Summary for {len(self.all_results)} Task-Optimizer Pairs:[/bold]")
+        self.console.print("=" * 80)
+
+        for _, results in self.all_results.items():
+            task = results["task"]
+            optimizer = results["optimizer"]
+
+            self.console.print(f"\n[bold cyan]{task} + {optimizer}[/bold cyan]")
+            self.console.print(f"  Completed trials: {results['completed_trials']}/{results['n_trials']}")
+
             if self.objective == "multiobjective":
-                if trial.values is not None:
-                    plan_time, reward = trial.values
-                    value_str = f"plan_time={plan_time:.4f}s, reward={reward:.4f}"
-                else:
-                    value_str = "N/A"
+                pareto_size = results.get("pareto_front_size", 0)
+                self.console.print(f"  Pareto front size: {pareto_size}")
+
+                # show best solutions
+                pareto_solutions = results.get("pareto_solutions", [])
+                if pareto_solutions:
+                    self.console.print("  Top Pareto solutions:")
+                    for i, solution in enumerate(pareto_solutions[:3]):
+                        plan_time = solution["plan_time"]
+                        reward = solution["reward"]
+                        self.console.print(f"    {i + 1}. plan_time={plan_time:.4f}s, reward={reward:.4f}")
             else:
-                value_str = f"{trial.value:.4f}" if trial.value is not None else "N/A"
-            self.console.print(f"  Trial {i + 1:2d} {status} {value_str}")
+                best_value = results.get("best_value", "N/A")
+                if best_value != "N/A":
+                    if self.objective == "plan_time":
+                        self.console.print(f"  Best plan time: {best_value:.4f}s")
+                    elif self.objective == "reward":
+                        self.console.print(f"  Best cumulative reward: {-best_value:.4f}")
 
-        # print parameter importance (if available)
-        if self.objective != "multiobjective":
-            try:
-                importance = optuna.importance.get_param_importances(self.study)
-                if importance:
-                    self.console.print("\n[bold]Parameter Importance:[/bold]")
-                    for param, imp in sorted(importance.items(), key=lambda x: x[1], reverse=True):
-                        self.console.print(f"  {param}: {imp:.3f}")
-            except Exception:
-                pass  # importance analysis might fail for small studies
+                # show top parameters
+                best_params = results.get("best_parameters", {})
+                if best_params:
+                    self.console.print("  Best parameters:")
+                    for param, value in list(best_params.items())[:5]:  # Show top 5 params
+                        self.console.print(f"    {param}: {value}")
+
+        # print comparison summary
+        self.console.print(f"\n[bold]Cross-Pair Comparison ({self.objective}):[/bold]")
+        self.console.print("-" * 60)
+
+        if self.objective == "multiobjective":
+            # For multi-objective, show Pareto front sizes
+            pareto_summary = []
+            for pair_key, results in self.all_results.items():
+                pareto_size = results.get("pareto_front_size", 0)
+                pareto_summary.append((pair_key, pareto_size))
+
+            pareto_summary.sort(key=lambda x: x[1], reverse=True)
+            self.console.print("Pairs ranked by Pareto front size:")
+            for i, (pair_key, size) in enumerate(pareto_summary):
+                task, optimizer = pair_key.split("_", 1)
+                self.console.print(f"  {i + 1:2d}. {task} + {optimizer}: {size} solutions")
         else:
-            # For multi-objective, show hypervolume if possible
-            try:
-                if len(self.study.best_trials) > 1:
-                    # Could add hypervolume calculation here if needed
-                    self.console.print("\n[bold]Multi-objective Statistics:[/bold]")
-                    self.console.print(f"  Pareto front size: {len(self.study.best_trials)}")
-            except Exception:
-                pass
+            # For single objective, rank pairs by best value
+            best_values = []
+            for pair_key, results in self.all_results.items():
+                best_value = results.get("best_value")
+                if best_value is not None:
+                    best_values.append((pair_key, best_value))
 
-        print("\nHyperparameter tuning complete! You may terminate the stack.")
+            # sort based on objective (minimize for plan_time, maximize for reward)
+            reverse_sort = self.objective == "reward"
+            best_values.sort(key=lambda x: x[1], reverse=reverse_sort)
+
+            self.console.print(f"Pairs ranked by best {self.objective}:")
+            for i, (pair_key, value) in enumerate(best_values):
+                task, optimizer = pair_key.split("_", 1)
+                if self.objective == "plan_time":
+                    self.console.print(f"  {i + 1:2d}. {task} + {optimizer}: {value:.4f}s")
+                elif self.objective == "reward":
+                    self.console.print(f"  {i + 1:2d}. {task} + {optimizer}: {-value:.4f}")
+
+        self.console.print(f"\n[bold]Results saved to: {self.results_dir}[/bold]")
+        self.console.print(f"  Combined results: {combined_file}")
+        self.console.print(f"  Individual results: {self.results_dir}/*_results.json")
+
+        print("\nMulti-pair hyperparameter tuning complete! You may terminate the stack.")
