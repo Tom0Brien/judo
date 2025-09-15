@@ -74,7 +74,9 @@ class Cartpole(Task[CartpoleConfig]):
         return vertical_rew + centered_rew + velocity_rew + control_rew
 
     def reset(self) -> None:
-        """Resets the model to a default (random) state."""
-        self.data.qpos = np.array([1.0, np.pi]) + np.random.randn(2)
-        self.data.qvel = 1e-1 * np.random.randn(2)
+        """Resets the model to a deterministic state for fair comparison."""
+        # Use fixed initial conditions that provide a challenging but consistent start
+        # Cart position slightly off-center, pole slightly off-vertical
+        self.data.qpos = np.array([0.5, np.pi + 0.2])  # Cart at 0.5, pole 0.2 rad from vertical
+        self.data.qvel = np.array([0.1, -0.05])  # Small fixed initial velocities
         mujoco.mj_forward(self.model, self.data)

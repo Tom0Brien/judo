@@ -418,6 +418,9 @@ class TunerNode(DoraNode):
             "completed_trials": len([t for t in self.study.trials if t.state == optuna.trial.TrialState.COMPLETE]),
         }
 
+        # Find individual best solutions for each objective
+        completed_trials = [t for t in self.study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+
         if self.objective == "multiobjective":
             # Multi-objective results
             pareto_trials = self.study.best_trials
@@ -429,11 +432,53 @@ class TunerNode(DoraNode):
                     results["pareto_solutions"].append(
                         {"plan_time": plan_time, "reward": reward, "parameters": trial.params}
                     )
+
+            # Find individual best solutions
+            if completed_trials:
+                # Best reward (highest reward value)
+                best_reward_trial = max(completed_trials, key=lambda t: t.values[1] if t.values else -float("inf"))
+                if best_reward_trial.values:
+                    results["best_reward_solution"] = {
+                        "plan_time": best_reward_trial.values[0],
+                        "reward": best_reward_trial.values[1],
+                        "parameters": best_reward_trial.params,
+                    }
+
+                # Best plan time (lowest plan time value)
+                best_plan_time_trial = min(completed_trials, key=lambda t: t.values[0] if t.values else float("inf"))
+                if best_plan_time_trial.values:
+                    results["best_plan_time_solution"] = {
+                        "plan_time": best_plan_time_trial.values[0],
+                        "reward": best_plan_time_trial.values[1],
+                        "parameters": best_plan_time_trial.params,
+                    }
         else:
             # Single objective results
             best_trial = self.study.best_trial
             results["best_value"] = best_trial.value
             results["best_parameters"] = best_trial.params
+
+            # For single objectives, still track the other metric if available
+            if completed_trials and self.objective == "plan_time":
+                # We're optimizing plan time, but also show best reward achieved
+                # Note: For plan_time objective, trial.value is plan_time
+                best_plan_time_trial = best_trial  # This is already the best plan time
+                results["best_plan_time_solution"] = {"plan_time": best_trial.value, "parameters": best_trial.params}
+
+                # Try to find trial with best reward (this would require additional tracking)
+                # For now, we'll note this limitation in a comment
+                results["note"] = "Individual reward tracking not available for single-objective plan_time optimization"
+
+            elif completed_trials and self.objective == "reward":
+                # We're optimizing reward, but also show best plan time achieved
+                # Note: For reward objective, trial.value is -reward (since optuna minimizes)
+                best_reward_trial = best_trial  # This is already the best reward
+                results["best_reward_solution"] = {
+                    "reward": -best_trial.value,  # Convert back from negative
+                    "parameters": best_trial.params,
+                }
+
+                results["note"] = "Individual plan_time tracking not available for single-objective reward optimization"
 
             # parameter importance
             try:
@@ -450,9 +495,16 @@ class TunerNode(DoraNode):
         with open(pair_file, "w") as f:
             json.dump(results, f, indent=2)
 
+        # Print results summary
         print(f"Results saved for {self.target_task} + {self.target_optimizer}")
         if self.objective == "multiobjective":
             print(f"  Pareto front size: {len(pareto_trials)}")
+            if "best_reward_solution" in results:
+                best_reward = results["best_reward_solution"]
+                print(f"  Best reward: {best_reward['reward']:.4f} (plan_time: {best_reward['plan_time']:.4f}s)")
+            if "best_plan_time_solution" in results:
+                best_plan_time = results["best_plan_time_solution"]
+                print(f"  Best plan time: {best_plan_time['plan_time']:.4f}s (reward: {best_plan_time['reward']:.4f})")
         else:
             print(f"  Best value: {best_trial.value:.4f}")
 
@@ -532,7 +584,20 @@ class TunerNode(DoraNode):
                 pareto_size = results.get("pareto_front_size", 0)
                 self.console.print(f"  Pareto front size: {pareto_size}")
 
-                # show best solutions
+                # show individual best solutions
+                best_reward = results.get("best_reward_solution")
+                if best_reward:
+                    self.console.print(
+                        f"  Best reward: {best_reward['reward']:.4f} (plan_time: {best_reward['plan_time']:.4f}s)"
+                    )
+
+                best_plan_time = results.get("best_plan_time_solution")
+                if best_plan_time:
+                    self.console.print(
+                        f"  Best plan time: {best_plan_time['plan_time']:.4f}s (reward: {best_plan_time['reward']:.4f})"
+                    )
+
+                # show top pareto solutions
                 pareto_solutions = results.get("pareto_solutions", [])
                 if pareto_solutions:
                     self.console.print("  Top Pareto solutions:")
@@ -547,6 +612,15 @@ class TunerNode(DoraNode):
                         self.console.print(f"  Best plan time: {best_value:.4f}s")
                     elif self.objective == "reward":
                         self.console.print(f"  Best cumulative reward: {-best_value:.4f}")
+
+                # show individual best solutions for single objectives too
+                best_reward = results.get("best_reward_solution")
+                if best_reward:
+                    self.console.print(f"  Best reward achieved: {best_reward['reward']:.4f}")
+
+                best_plan_time = results.get("best_plan_time_solution")
+                if best_plan_time:
+                    self.console.print(f"  Best plan time achieved: {best_plan_time['plan_time']:.4f}s")
 
                 # show top parameters
                 best_params = results.get("best_parameters", {})
@@ -590,6 +664,40 @@ class TunerNode(DoraNode):
                     self.console.print(f"  {i + 1:2d}. {task} + {optimizer}: {value:.4f}s")
                 elif self.objective == "reward":
                     self.console.print(f"  {i + 1:2d}. {task} + {optimizer}: {-value:.4f}")
+
+        # Show absolute best across all pairs for individual objectives
+        self.console.print("\n[bold]Absolute Best Across All Pairs:[/bold]")
+        self.console.print("-" * 50)
+
+        # Find absolute best reward across all pairs
+        best_reward_global = None
+        best_reward_pair = None
+        best_plan_time_global = None
+        best_plan_time_pair = None
+
+        for pair_key, results in self.all_results.items():
+            task, optimizer = pair_key.split("_", 1)
+
+            # Check best reward solution
+            best_reward_solution = results.get("best_reward_solution")
+            if best_reward_solution and (
+                best_reward_global is None or best_reward_solution["reward"] > best_reward_global
+            ):
+                best_reward_global = best_reward_solution["reward"]
+                best_reward_pair = f"{task} + {optimizer}"
+
+            # Check best plan time solution
+            best_plan_time_solution = results.get("best_plan_time_solution")
+            if best_plan_time_solution and (
+                best_plan_time_global is None or best_plan_time_solution["plan_time"] < best_plan_time_global
+            ):
+                best_plan_time_global = best_plan_time_solution["plan_time"]
+                best_plan_time_pair = f"{task} + {optimizer}"
+
+        if best_reward_global is not None:
+            self.console.print(f"Best reward: {best_reward_global:.4f} ({best_reward_pair})")
+        if best_plan_time_global is not None:
+            self.console.print(f"Best plan time: {best_plan_time_global:.4f}s ({best_plan_time_pair})")
 
         self.console.print(f"\n[bold]Results saved to: {self.results_dir}[/bold]")
         self.console.print(f"  Combined results: {combined_file}")

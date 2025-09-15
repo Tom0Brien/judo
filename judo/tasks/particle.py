@@ -97,10 +97,11 @@ class Particle(Task[ParticleConfig]):
         return -total_cost
 
     def reset(self) -> None:
-        """Reset the particle to a random starting position."""
-        # Start at origin with small random perturbation
-        self.data.qpos[:2] = 0.1 * np.random.randn(2)
-        self.data.qvel[:2] = 0.01 * np.random.randn(2)
+        """Reset the particle to a deterministic starting position for fair comparison."""
+        # Start at a fixed position with small deterministic offset for interesting dynamics
+        # Use a consistent but non-trivial starting position
+        self.data.qpos[:2] = np.array([-0.1, 0.05])  # Fixed starting position
+        self.data.qvel[:2] = np.array([0.02, -0.01])  # Small fixed initial velocity
 
         # Set goal position (mocap body)
         goal_pos = np.array([0.25, 0.0, 0.01])

@@ -101,18 +101,15 @@ class LeapCube(Task[LeapCubeConfig]):
             self._update_goal_quat()
 
     def _update_goal_quat(self) -> None:
-        """Updates the goal quaternion."""
-        # generate uniformly random quaternion
-        # https://stackoverflow.com/a/44031492
-        uvw = np.random.rand(3)
-        goal_quat = np.array(
-            [
-                np.sqrt(1 - uvw[0]) * np.sin(2 * np.pi * uvw[1]),
-                np.sqrt(1 - uvw[0]) * np.cos(2 * np.pi * uvw[1]),
-                np.sqrt(uvw[0]) * np.sin(2 * np.pi * uvw[2]),
-                np.sqrt(uvw[0]) * np.cos(2 * np.pi * uvw[2]),
-            ]
-        )
+        """Updates the goal quaternion to a fixed orientation for fair comparison."""
+        # Use a fixed challenging goal quaternion instead of random
+        # This represents a 90-degree rotation around the Z-axis (quarter turn)
+        goal_quat = np.array([0.7071, 0.0, 0.0, 0.7071])  # 90 deg rotation around z-axis
+
+        # Alternative fixed challenging orientations (uncomment to use):
+        # goal_quat = np.array([0.5, 0.5, 0.5, 0.5])  # 120 deg rotation
+        # goal_quat = np.array([0.0, 0.0, 0.0, 1.0])  # 180 deg rotation around z-axis
+
         self.data.mocap_quat[0] = goal_quat
         self.goal_quat = goal_quat
 
