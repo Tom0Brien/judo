@@ -17,7 +17,11 @@ from judo.tasks import get_registered_tasks
 
 
 class TunerNode(DoraNode):
-    """A node that tunes task/optimizer parameters using Optuna to minimize plan times."""
+    """A node that tunes task/optimizer parameters using Optuna.
+
+    Supports single-objective optimization (plan_time, reward) or multi-objective
+    optimization (multiobjective) to find Pareto-optimal solutions.
+    """
 
     def __init__(
         self,
@@ -27,7 +31,7 @@ class TunerNode(DoraNode):
         n_samples_per_trial: int = 20,
         target_task: str = "cylinder_push",
         target_optimizer: str = "mppi",
-        objective: Literal["plan_time", "reward", "combined"] = "plan_time",
+        objective: Literal["plan_time", "reward", "multiobjective"] = "plan_time",
         reward_weight: float = 1.0,
         plan_time_weight: float = 1.0,
         trial_duration: float = 10.0,
@@ -70,18 +74,32 @@ class TunerNode(DoraNode):
         self.current_rewards = []
 
         # optuna study
-        self.study = optuna.create_study(
-            direction="minimize",
-            study_name=study_name or f"optimize_{target_task}_{target_optimizer}",
-            storage=storage,
-            load_if_exists=True,
-        )
+        if objective == "multiobjective":
+            # Multi-objective: minimize plan_time, maximize reward
+            self.study = optuna.create_study(
+                directions=["minimize", "maximize"],
+                study_name=study_name or f"optimize_{target_task}_{target_optimizer}_multiobjective",
+                storage=storage,
+                load_if_exists=True,
+            )
+        else:
+            # Single objective
+            self.study = optuna.create_study(
+                direction="minimize",
+                study_name=study_name or f"optimize_{target_task}_{target_optimizer}",
+                storage=storage,
+                load_if_exists=True,
+            )
 
         # console for printing
         self.console = Console()
 
         print(f"Starting hyperparameter tuning for {target_task} + {target_optimizer}!")
         print(f"Target: {n_trials} trials with {n_samples_per_trial} samples each")
+        if objective == "multiobjective":
+            print("Mode: Multi-objective optimization (plan_time vs reward)")
+        else:
+            print(f"Mode: Single-objective optimization ({objective})")
 
         # set initial task and optimizer
         self.node.send_output("task", pa.array([self.target_task]))
@@ -209,29 +227,32 @@ class TunerNode(DoraNode):
 
         # compute reward metrics if trajectory data is available
         cumulative_reward = -1e12
-        if self.trajectory_states and self.objective in ["reward", "combined"]:
+        if self.trajectory_states and self.objective in ["reward", "multiobjective"]:
             cumulative_reward = self.compute_cumulative_reward()
 
-        # compute objective value based on selected objective
+        # report to optuna based on objective type
         if self.objective == "plan_time":
             objective_value = mean_plan_time
+            self.study.tell(self.current_trial, objective_value)
         elif self.objective == "reward":
             objective_value = -cumulative_reward  # negative because optuna minimizes
-        elif self.objective == "combined":
-            # normalize both metrics and combine
-            objective_value = self.plan_time_weight * mean_plan_time - self.reward_weight * cumulative_reward
+            self.study.tell(self.current_trial, objective_value)
+        elif self.objective == "multiobjective":
+            # Multi-objective: minimize plan_time, maximize reward
+            objectives = [mean_plan_time, cumulative_reward]
+            self.study.tell(self.current_trial, objectives)
         else:
             raise ValueError(f"Unknown objective: {self.objective}")
-
-        # report to optuna
-        self.study.tell(self.current_trial, objective_value)
 
         # print results
         print(f"Trial {len(self.study.trials)} completed:")
         print(f"  Plan time: {mean_plan_time:.4f}s ± {std_plan_time:.4f}s")
-        if self.objective in ["reward", "combined"]:
+        if self.objective in ["reward", "multiobjective"]:
             print(f"  Cumulative reward: {cumulative_reward:.4f}")
-        print(f"  Objective value: {objective_value:.4f}")
+        if self.objective == "multiobjective":
+            print(f"  Objectives: [plan_time={mean_plan_time:.4f}s, reward={cumulative_reward:.4f}]")
+        else:
+            print(f"  Objective value: {objective_value:.4f}")
 
         # start next trial
         self.start_next_trial()
@@ -271,34 +292,64 @@ class TunerNode(DoraNode):
             print("No trials completed.")
             return
 
-        # print best trial
-        best_trial = self.study.best_trial
-        self.console.print("[bold]Best Trial:[/bold]")
-        if self.objective == "plan_time":
-            self.console.print(f"  Best plan time: {best_trial.value:.4f}s")
-        elif self.objective == "reward":
-            self.console.print(f"  Best cumulative reward: {-best_trial.value:.4f}")
-        elif self.objective == "combined":
-            self.console.print(f"  Best combined objective: {best_trial.value:.4f}")
-        self.console.print("  Parameters:")
-        for key, value in best_trial.params.items():
-            self.console.print(f"    {key}: {value}")
+        # print best trial(s)
+        if self.objective == "multiobjective":
+            # For multi-objective, show Pareto front
+            pareto_trials = self.study.best_trials
+            self.console.print(f"[bold]Pareto Front ({len(pareto_trials)} solutions):[/bold]")
+            for i, trial in enumerate(pareto_trials[:5]):  # Show top 5 Pareto solutions
+                plan_time, reward = trial.values
+                self.console.print(f"  Solution {i + 1}: plan_time={plan_time:.4f}s, reward={reward:.4f}")
+                self.console.print("    Parameters:")
+                for key, value in trial.params.items():
+                    self.console.print(f"      {key}: {value}")
+                self.console.print("")
+            if len(pareto_trials) > 5:
+                self.console.print(f"  ... and {len(pareto_trials) - 5} more solutions")
+        else:
+            # Single objective - show best trial
+            best_trial = self.study.best_trial
+            self.console.print("[bold]Best Trial:[/bold]")
+            if self.objective == "plan_time":
+                self.console.print(f"  Best plan time: {best_trial.value:.4f}s")
+            elif self.objective == "reward":
+                self.console.print(f"  Best cumulative reward: {-best_trial.value:.4f}")
+            self.console.print("  Parameters:")
+            for key, value in best_trial.params.items():
+                self.console.print(f"    {key}: {value}")
 
         # print tuning history
         self.console.print("\n[bold]Tuning History:[/bold]")
         for i, trial in enumerate(self.study.trials):
             status = "✓" if trial.state == optuna.trial.TrialState.COMPLETE else "✗"
-            value_str = f"{trial.value:.4f}s" if trial.value is not None else "N/A"
+            if self.objective == "multiobjective":
+                if trial.values is not None:
+                    plan_time, reward = trial.values
+                    value_str = f"plan_time={plan_time:.4f}s, reward={reward:.4f}"
+                else:
+                    value_str = "N/A"
+            else:
+                value_str = f"{trial.value:.4f}" if trial.value is not None else "N/A"
             self.console.print(f"  Trial {i + 1:2d} {status} {value_str}")
 
         # print parameter importance (if available)
-        try:
-            importance = optuna.importance.get_param_importances(self.study)
-            if importance:
-                self.console.print("\n[bold]Parameter Importance:[/bold]")
-                for param, imp in sorted(importance.items(), key=lambda x: x[1], reverse=True):
-                    self.console.print(f"  {param}: {imp:.3f}")
-        except Exception:
-            pass  # importance analysis might fail for small studies
+        if self.objective != "multiobjective":
+            try:
+                importance = optuna.importance.get_param_importances(self.study)
+                if importance:
+                    self.console.print("\n[bold]Parameter Importance:[/bold]")
+                    for param, imp in sorted(importance.items(), key=lambda x: x[1], reverse=True):
+                        self.console.print(f"  {param}: {imp:.3f}")
+            except Exception:
+                pass  # importance analysis might fail for small studies
+        else:
+            # For multi-objective, show hypervolume if possible
+            try:
+                if len(self.study.best_trials) > 1:
+                    # Could add hypervolume calculation here if needed
+                    self.console.print("\n[bold]Multi-objective Statistics:[/bold]")
+                    self.console.print(f"  Pareto front size: {len(self.study.best_trials)}")
+            except Exception:
+                pass
 
         print("\nHyperparameter tuning complete! You may terminate the stack.")

@@ -1,0 +1,16 @@
+defaults:
+  - tune_default
+
+node_definitions:
+  tuner:
+    _target_: judo.app.tune.TunerNode
+    node_id: tuner
+    max_workers: null
+    n_trials: 50
+    n_samples_per_trial: 15
+    target_task: leap_cube
+    target_optimizer: cem
+    objective: multiobjective  # find Pareto-optimal solutions for speed vs performance
+    trial_duration: 20.0
+    study_name: "leap_cube_multiobjective_optimization"
+    storage: "sqlite:///leap_cube_multiobjective_tuning.db"
