@@ -44,8 +44,16 @@ class CrossEntropyMethod(Optimizer[CrossEntropyMethodConfig]):
     def pre_optimization(self, old_times: np.ndarray, new_times: np.ndarray) -> None:
         """Update sigma if the number of nodes has changed."""
         if len(self.sigma) != self.num_nodes:
+            # Create old_times that matches the current sigma dimensions
+            # This handles cases where the configuration changed between calls
+            if len(old_times) != len(self.sigma):
+                # Generate time points that match current sigma size
+                old_times_adjusted = np.linspace(old_times[0], old_times[-1], len(self.sigma))
+            else:
+                old_times_adjusted = old_times
+
             self.sigma = interp1d(
-                old_times,
+                old_times_adjusted,
                 self.sigma,
                 axis=0,
                 fill_value="extrapolate",  # interp1d has wrong typing # type: ignore
