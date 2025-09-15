@@ -67,5 +67,9 @@ node_definitions:
     n_samples_per_trial: 20
     target_task: cylinder_push
     target_optimizer: mppi
+    objective: reward  # "plan_time", "reward", or "combined"
+    reward_weight: 1.0
+    plan_time_weight: 1.0
+    trial_duration: 10.0
     study_name: null
     storage: null

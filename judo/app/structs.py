@@ -38,6 +38,8 @@ class MujocoState:
     xquat: np.ndarray
     mocap_pos: np.ndarray
     mocap_quat: np.ndarray
+    sensordata: np.ndarray
+    ctrl: np.ndarray
     sim_metadata: dict[str, Any]
 
 

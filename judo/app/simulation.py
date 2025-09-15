@@ -99,6 +99,8 @@ class SimulationNode(DoraNode):
             xquat=self.task.data.xquat,  # type: ignore
             mocap_pos=self.task.data.mocap_pos,  # type: ignore
             mocap_quat=self.task.data.mocap_quat,  # type: ignore
+            sensordata=self.task.data.sensordata,  # type: ignore
+            ctrl=self.task.data.ctrl,  # type: ignore
             sim_metadata=self.task.get_sim_metadata(),
         )
         arr, metadata = to_arrow(sim_state)

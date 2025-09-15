@@ -1,0 +1,18 @@
+defaults:
+  - tune_default
+
+node_definitions:
+  tuner:
+    _target_: judo.app.tune.TunerNode
+    node_id: tuner
+    max_workers: null
+    n_trials: 50
+    n_samples_per_trial: 15
+    target_task: leap_cube
+    target_optimizer: cem
+    objective: combined  # optimize both speed and performance
+    reward_weight: 2.0  # weight reward more heavily
+    plan_time_weight: 0.1  # but still consider plan time
+    trial_duration: 20.0
+    study_name: "leap_cube_combined_optimization"
+    storage: "sqlite:///leap_cube_combined_tuning.db"
