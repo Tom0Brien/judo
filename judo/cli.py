@@ -59,3 +59,24 @@ def benchmark() -> None:
         default_cfg = compose(config_name="benchmark_default")
         cs.store("benchmark", default_cfg)  # don't name this benchmark_default so it doesn't clash
     main_benchmark()
+
+
+# #### #
+# tune #
+# #### #
+
+
+@hydra.main(config_path=str(CONFIG_PATH), config_name="tune_default", version_base="1.3")
+def main_tune(cfg: DictConfig) -> None:
+    """Hyperparameter tuning hydra call."""
+    run(cfg)
+
+
+def tune() -> None:
+    """Entry point for hyperparameter tuning."""
+    # we store tune_default in the config store so that custom configs located outside of judo can inherit from it
+    cs = ConfigStore.instance()
+    with initialize_config_dir(config_dir=str(CONFIG_PATH), version_base="1.3"):
+        default_cfg = compose(config_name="tune_default")
+        cs.store("tune", default_cfg)  # don't name this tune_default so it doesn't clash
+    main_tune()

@@ -1,0 +1,71 @@
+defaults:
+  - judo_default
+
+dataflow:
+  nodes:
+    - id: simulation
+      path: dynamic
+      inputs:
+        task:
+          source: tuner/task
+          queue_size: 1
+        task_reset:
+          source: tuner/task_reset
+          queue_size: 1
+        controls:
+          source: controller/controls
+          queue_size: 1
+      outputs:
+        - states
+    - id: tuner
+      path: dynamic
+      inputs:
+        states:
+          source: simulation/states
+          queue_size: 1
+        traces:
+          source: controller/traces
+          queue_size: 1
+        plan_time:
+          source: controller/plan_time
+          queue_size: 1
+      outputs:
+        - task
+        - optimizer
+        - optimizer_config
+        - task_reset
+    - id: controller
+      path: dynamic
+      inputs:
+        task:
+          source: tuner/task
+          queue_size: 1
+        optimizer:
+          source: tuner/optimizer
+          queue_size: 1
+        optimizer_config:
+          source: tuner/optimizer_config
+          queue_size: 1
+        task_reset:
+          source: tuner/task_reset
+          queue_size: 1
+        states:
+          source: simulation/states
+          queue_size: 1
+      outputs:
+        - controls
+        - traces
+        - plan_time
+
+node_definitions:
+  visualization: null  # deletes the viz node from judo defaults
+  tuner:
+    _target_: judo.app.tune.TunerNode
+    node_id: tuner
+    max_workers: null
+    n_trials: 50
+    n_samples_per_trial: 20
+    target_task: cylinder_push
+    target_optimizer: mppi
+    study_name: null
+    storage: null

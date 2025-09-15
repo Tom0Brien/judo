@@ -33,6 +33,7 @@ dependencies = [
     "huggingface_hub",  # for downloading motion capture data in humanoid_mocap task
     "mujoco",
     "numpy",
+    "optuna",  # for hyperparameter optimization
     "pillow",  # for displaying app logo
     "requests",  # for sharing GUI link
     "rich",  # for displaying tables in benchmarking
@@ -46,6 +47,7 @@ dependencies = [
 [project.scripts]
 judo = "judo.cli:app"
 benchmark = "judo.cli:benchmark"
+tune = "judo.cli:tune"
 
 [tool.hatch.metadata]
 allow-direct-references = true
