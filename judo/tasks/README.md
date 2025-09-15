@@ -11,6 +11,7 @@ This README documents all of the tasks that are currently available in Judo.
 | [caltech_leap_cube](#caltech-leap-cube) | Rotate a cube to a target orientation using a modified LEAP hand at Caltech. |
 | [particle](#particle) | Control a 2D point mass to reach a target position using velocity commands. |
 | [pusht](#pusht) | Push a T-shaped block to a target position and orientation using a pusher sphere. |
+| [humanoid_mocap](#humanoid-mocap) | Control a Unitree G1 humanoid robot to track motion capture reference data. |
 
 ## Cylinder Push
 The cylinder push task has the following weights:
@@ -144,3 +145,16 @@ The pusht task has the following weights:
 | `w_proximity` | Penalizes the distance between the pusher sphere and the T-shaped block. |
 
 This task requires pushing a T-shaped block (blue) to match a target pose (green) using a red pusher sphere. The pusher can move in 2D and must strategically position itself to manipulate the block's position and orientation.
+
+## Humanoid Mocap
+The humanoid mocap task has the following weights:
+
+| Weight | Description |
+| ------ | ----------- |
+| `w_configuration` | Penalizes the joint configuration error relative to motion capture reference. |
+| `w_foot_position` | Penalizes the foot position error relative to motion capture reference. |
+| `w_foot_orientation` | Penalizes the foot orientation error relative to motion capture reference. |
+| `w_control` | Penalizes the control effort relative to reference joint positions. |
+| `reference_filename` | Specifies the motion capture file from the LocoMuJoCo dataset. |
+
+This task controls a Unitree G1 humanoid robot to track motion capture reference data from the LocoMuJoCo dataset. The robot must match both joint configurations and foot trajectories while maintaining balance and natural motion. Motion capture data is automatically downloaded from HuggingFace.

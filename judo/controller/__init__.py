@@ -7,6 +7,7 @@ from judo.controller.overrides import (
     set_default_cartpole_overrides,
     set_default_cylinder_push_overrides,
     set_default_fr3_pick_overrides,
+    set_default_humanoid_mocap_overrides,
     set_default_leap_cube_down_overrides,
     set_default_leap_cube_overrides,
 )
@@ -24,6 +25,7 @@ set_default_cylinder_push_overrides()
 set_default_fr3_pick_overrides()
 set_default_leap_cube_overrides()
 set_default_leap_cube_down_overrides()
+set_default_humanoid_mocap_overrides()
 
 __all__ = [
     "Controller",

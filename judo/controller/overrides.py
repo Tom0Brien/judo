@@ -79,3 +79,44 @@ def set_default_fr3_pick_overrides() -> None:
             "control_freq": 20.0,
         },
     )
+
+
+def set_default_particle_overrides() -> None:
+    """Sets the default task-specific controller config overrides for the particle task."""
+    set_config_overrides(
+        "particle",
+        ControllerConfig,
+        {
+            "horizon": 0.25,
+            "spline_order": "zero",
+            "num_knots": 11,
+        },
+    )
+
+
+def set_default_pusht_overrides() -> None:
+    """Sets the default task-specific controller config overrides for the pusht task."""
+    set_config_overrides(
+        "pusht",
+        ControllerConfig,
+        {
+            "horizon": 0.5,
+            "spline_order": "zero",
+            "num_knots": 6,
+        },
+    )
+
+
+def set_default_humanoid_mocap_overrides() -> None:
+    """Sets the default task-specific controller config overrides for the humanoid mocap task."""
+    set_config_overrides(
+        "humanoid_mocap",
+        ControllerConfig,
+        {
+            "horizon": 0.6,
+            "spline_order": "zero",
+            "num_knots": 4,
+            "max_num_traces": 0,
+            "control_freq": 100.0,
+        },
+    )

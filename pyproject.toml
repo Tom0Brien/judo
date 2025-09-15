@@ -30,6 +30,7 @@ classifiers = [
 
 dependencies = [
     "dora-utils",  # dora + qol utils for writing nodes
+    "huggingface_hub",  # for downloading motion capture data in humanoid_mocap task
     "mujoco",
     "numpy",
     "pillow",  # for displaying app logo
