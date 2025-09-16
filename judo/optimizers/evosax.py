@@ -1,25 +1,74 @@
 # Copyright (c) 2025 Robotics and AI Institute LLC. All rights reserved.
 
 from dataclasses import dataclass, field
-from typing import Any, Type
+from typing import Any, Type, Literal
 
 import numpy as np
 import jax
 import jax.numpy as jnp
 from evosax.algorithms.base import EvolutionaryAlgorithm
-from typing import Literal
 
 from judo.gui import slider
 from judo.optimizers.base import Optimizer, OptimizerConfig
 
 
 @slider("sigma", 0.001, 1.0, 0.01)
+@slider("c_c", 0.001, 1.0, 0.01)
+@slider("c_1", 0.001, 1.0, 0.01)
+@slider("c_mu", 0.001, 2.0, 0.01)
+@slider("c_sigma", 0.001, 1.0, 0.01)
+@slider("d_sigma", 0.1, 5.0, 0.1)
+@slider("cm", 0.1, 2.0, 0.1)
+@slider("temperature", 0.001, 1.0, 0.01)
+@slider("mutation_rate", 0.001, 0.5, 0.01)
+@slider("elite_ratio", 0.05, 0.5, 0.05)
+@slider("learning_rate", 0.001, 1.0, 0.01)
 @dataclass
 class EvosaxConfig(OptimizerConfig):
-    """Configuration for evosax-based optimizers."""
-    algorithm_name: Literal["CMA_ES", "OpenAI_ES", "xNES", "SNES", "RandomSearch", "SimulatedAnnealing", "PGPE", "ARS", "Sep_CMA_ES", "GradientlessDescent", "SAMR_GA", "SimpleGA", "DifferentialEvolution", "PSO"] = "SAMR_GA"
+    """Configuration for evosax-based optimizers with individual algorithm parameters."""
+
+    # Basic parameters
     sigma: float = 0.1
-    algorithm_kwargs: dict = field(default_factory=dict)
+    algorithm_name: Literal[
+        "CMA_ES", "Sep_CMA_ES", "xNES", "SNES", "PGPE", "ARS", 
+        "SimulatedAnnealing", "GradientlessDescent",
+        "DifferentialEvolution", "PSO", "SAMR_GA"
+    ] = "CMA_ES"
+    
+    # CMA-ES specific parameters
+    c_c: float = 0.0  # Cumulation parameter for covariance matrix (0 = auto)
+    c_1: float = 0.0  # Learning rate for rank-one update (0 = auto)
+    c_mu: float = 0.0  # Learning rate for rank-mu update (0 = auto)
+    c_sigma: float = 0.0  # Cumulation parameter for step-size control (0 = auto)
+    d_sigma: float = 0.0  # Damping factor for step-size adaptation (0 = auto)
+    cm: float = 1.0  # Learning rate for mean update
+    
+    # Evolution Strategy parameters
+    temperature: float = 0.1  # Temperature for MPPI-style algorithms
+    mutation_rate: float = 0.1  # Mutation rate for GA/ES algorithms
+    elite_ratio: float = 0.2  # Fraction of population to use as elites
+    learning_rate: float = 0.01  # Learning rate for gradient-based ES
+    
+    # Advanced parameters
+    use_antithetic_sampling: bool = False  # Use antithetic sampling for variance reduction
+    use_fitness_shaping: bool = True  # Apply fitness shaping/ranking
+    restart_strategy: str = "none"  # Restart strategy: "none", "ipop", "bipop"
+    
+    def get_algorithm_kwargs(self) -> dict:
+        """Build algorithm-specific kwargs from individual parameters."""
+        kwargs = {}
+        
+        # For now, be conservative and only pass parameters we know work
+        # Most evosax algorithms don't accept custom parameters in their constructors
+        # Instead, they use default_params that can be modified after initialization
+        
+        # CMA-ES variants typically don't accept custom parameters in constructor
+        # The parameters are handled through the params object instead
+        
+        # Most parameters will be handled through the evosax default_params mechanism
+        # For now, keep the constructor calls minimal to avoid parameter errors
+        
+        return kwargs
 
 
 class Evosax(Optimizer[EvosaxConfig]):
@@ -71,15 +120,19 @@ class Evosax(Optimizer[EvosaxConfig]):
         
         # Initialize the evolution strategy
         # Following the Hydrax pattern for evosax initialization
+        algorithm_kwargs = config.get_algorithm_kwargs()
         self.strategy = algorithm_class(
             population_size=config.num_rollouts,
             # Only to inform the dimension to evosax 
             solution=jnp.zeros(config.num_nodes * nu), 
-            **config.algorithm_kwargs
+            **algorithm_kwargs
         )
         
         # Get default parameters
         self.es_params = self.strategy.default_params
+        
+        # Apply custom parameters to the evosax params object
+        self._apply_custom_params(config)
         
         # Initialize optimizer state
         self.rng_key, init_key = jax.random.split(self.rng_key)
@@ -108,6 +161,108 @@ class Evosax(Optimizer[EvosaxConfig]):
                 params=self.es_params
             )
 
+    def _apply_custom_params(self, config: EvosaxConfig) -> None:
+        """Apply custom parameters to the evosax params object dynamically.
+        
+        This method inspects the actual evosax params structure and only applies
+        parameters that exist, making it robust across different algorithms.
+        """
+        # Get available parameter names from the evosax params object
+        available_params = set()
+        if hasattr(self.es_params, '__dataclass_fields__'):
+            available_params = set(self.es_params.__dataclass_fields__.keys())
+        elif hasattr(self.es_params, '_fields'):  # namedtuple
+            available_params = set(self.es_params._fields)
+        
+        # Create a mapping from our config parameters to actual evosax parameter names
+        # Based on inspection of real evosax algorithms
+        param_mapping = {
+            'sigma': ['std_init'],  # Main step-size parameter for most algorithms
+            'c_c': ['c_c'],  # CMA-ES covariance cumulation
+            'c_1': ['c_1'],  # CMA-ES rank-one learning rate
+            'c_mu': ['c_mu'],  # CMA-ES rank-mu learning rate  
+            'c_sigma': ['c_std'],  # CMA-ES step-size learning rate (actual name: c_std)
+            'd_sigma': ['d_std'],  # CMA-ES step-size damping (actual name: d_std)
+            'cm': ['c_mean'],  # CMA-ES mean learning rate (actual name: c_mean)
+            'temperature': ['temperature_init'],  # Simulated Annealing
+            'learning_rate': ['lr_std_init', 'std_lr'],  # Various ES learning rates
+            'mutation_rate': ['differential_weight', 'crossover_rate'],  # DE parameters
+            'elite_ratio': ['elitism'],  # Population-based algorithms
+        }
+        
+        # Only apply parameters that exist and have non-default values
+        params_to_update = {}
+        
+        for config_param, evosax_names in param_mapping.items():
+            if hasattr(config, config_param):
+                config_value = getattr(config, config_param)
+                
+                # Check if this is a non-default value worth applying
+                if self._should_apply_param(config_param, config_value):
+                    # Find the matching evosax parameter name
+                    for evosax_name in evosax_names:
+                        if evosax_name in available_params:
+                            params_to_update[evosax_name] = config_value
+                            break
+        
+        # Apply all valid parameter updates at once
+        if params_to_update:
+            try:
+                self.es_params = self.es_params.replace(**params_to_update)
+                print(f"Applied {len(params_to_update)} custom parameters for {config.algorithm_name}: {list(params_to_update.keys())}")
+            except Exception as e:
+                print(f"Warning: Could not apply some parameters for {config.algorithm_name}: {e}")
+        else:
+            print(f"No custom parameters applied for {config.algorithm_name} (using defaults)")
+
+    def _should_apply_param(self, param_name: str, value: Any) -> bool:
+        """Check if a parameter value should be applied (i.e., is non-default)."""
+        # Define what constitutes "default" values that should be skipped
+        defaults = {
+            'sigma': 0.1,
+            'c_c': 0.0,
+            'c_1': 0.0,
+            'c_mu': 0.0,
+            'c_sigma': 0.0,
+            'd_sigma': 0.0,
+            'cm': 1.0,
+            'temperature': 0.1,
+            'learning_rate': 0.01,
+            'mutation_rate': 0.1,
+            'elite_ratio': 0.2,
+        }
+        
+        default_value = defaults.get(param_name)
+        if default_value is None:
+            return True  # Unknown parameter, let it through
+            
+        # For numeric parameters, check if significantly different from default
+        if isinstance(value, (int, float)):
+            return abs(value - default_value) > 1e-6
+        
+        return value != default_value
+
+    def get_supported_parameters(self) -> dict:
+        """Get the parameters supported by the current algorithm.
+        
+        Returns:
+            Dictionary mapping parameter names to their current values.
+        """
+        if not hasattr(self, 'es_params'):
+            return {}
+            
+        supported = {}
+        if hasattr(self.es_params, '__dataclass_fields__'):
+            for field_name, field in self.es_params.__dataclass_fields__.items():
+                value = getattr(self.es_params, field_name)
+                supported[field_name] = value
+        elif hasattr(self.es_params, '_fields'):  # namedtuple
+            for field_name in self.es_params._fields:
+                value = getattr(self.es_params, field_name)
+                supported[field_name] = value
+                
+        return supported
+
     @property
     def config(self) -> EvosaxConfig:
         """Get the current config."""
@@ -115,19 +270,54 @@ class Evosax(Optimizer[EvosaxConfig]):
 
     @config.setter
     def config(self, new_config: EvosaxConfig) -> None:
-        """Set the config and reinitialize strategy if algorithm changed."""
+        """Set the config and update evosax parameters online."""
+        old_config = getattr(self, '_config', None)
         old_algorithm = getattr(self, '_current_algorithm_name', None)
         
         # Update the config
         self._config = new_config
         
         # Check if algorithm changed and if we're not in initial setup
-        if (old_algorithm is not None and 
-            old_algorithm != new_config.algorithm_name and 
-            hasattr(self, 'nu')):
+        algorithm_changed = (old_algorithm is not None and 
+                           old_algorithm != new_config.algorithm_name and 
+                           hasattr(self, 'nu'))
+        
+        if algorithm_changed:
             print(f"Algorithm changed from {old_algorithm} to {new_config.algorithm_name}, reinitializing...")
             self._current_algorithm_name = new_config.algorithm_name
             self._init_strategy(new_config, self.nu)
+        elif old_config is not None and hasattr(self, 'es_params'):
+            # Algorithm didn't change, but other parameters might have
+            # Apply parameter updates online without reinitializing strategy
+            if self._config_parameters_changed(old_config, new_config):
+                print("Parameters changed, updating evosax strategy online...")
+                self._apply_custom_params(new_config)
+
+    def _config_parameters_changed(self, old_config: EvosaxConfig, new_config: EvosaxConfig) -> bool:
+        """Check if any evosax-relevant parameters changed between configs.
+        
+        Args:
+            old_config: Previous configuration
+            new_config: New configuration
+            
+        Returns:
+            True if any parameters that affect evosax strategy changed
+        """
+        # List of parameters that affect evosax strategy behavior
+        evosax_params = [
+            'sigma', 'c_c', 'c_1', 'c_mu', 'c_sigma', 'd_sigma', 'cm',
+            'temperature', 'learning_rate', 'mutation_rate', 'elite_ratio',
+            'use_antithetic_sampling', 'use_fitness_shaping'
+        ]
+        
+        for param in evosax_params:
+            old_value = getattr(old_config, param, None)
+            new_value = getattr(new_config, param, None)
+            if old_value != new_value:
+                print(f"  Parameter '{param}' changed: {old_value} → {new_value}")
+                return True
+        
+        return False
 
     def _get_algorithm_class(self, algorithm_name: str) -> Type[EvolutionaryAlgorithm]:
         """Get the evosax algorithm class by name.
@@ -145,18 +335,14 @@ class Evosax(Optimizer[EvosaxConfig]):
             if algorithm_name == "CMA_ES":
                 from evosax.algorithms.distribution_based import CMA_ES
                 return CMA_ES
-            elif algorithm_name == "OpenAI_ES":
-                from evosax.algorithms.distribution_based import OpenAI_ES
-                return OpenAI_ES
+
             elif algorithm_name == "xNES":
                 from evosax.algorithms.distribution_based import xNES
                 return xNES
             elif algorithm_name == "SNES":
                 from evosax.algorithms.distribution_based import SNES
                 return SNES
-            elif algorithm_name == "RandomSearch":
-                from evosax.algorithms.distribution_based import RandomSearch
-                return RandomSearch
+
             elif algorithm_name == "SimulatedAnnealing":
                 from evosax.algorithms.distribution_based import SimulatedAnnealing
                 return SimulatedAnnealing
@@ -175,9 +361,7 @@ class Evosax(Optimizer[EvosaxConfig]):
             elif algorithm_name == "SAMR_GA":
                 from evosax.algorithms.population_based import SAMR_GA
                 return SAMR_GA
-            elif algorithm_name == "SimpleGA":
-                from evosax.algorithms.population_based import SimpleGA
-                return SimpleGA
+
             elif algorithm_name == "DifferentialEvolution":
                 from evosax.algorithms.population_based import DifferentialEvolution
                 return DifferentialEvolution
