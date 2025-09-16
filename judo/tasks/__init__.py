@@ -8,6 +8,7 @@ from judo.tasks.cartpole import Cartpole, CartpoleConfig
 from judo.tasks.cylinder_push import CylinderPush, CylinderPushConfig
 from judo.tasks.fr3_pick import FR3Pick, FR3PickConfig
 from judo.tasks.humanoid_mocap import HumanoidMocap, HumanoidMocapConfig
+from judo.tasks.humanoid_standup import HumanoidStandup, HumanoidStandupConfig
 from judo.tasks.leap_cube import LeapCube, LeapCubeConfig
 from judo.tasks.leap_cube_down import LeapCubeDown, LeapCubeDownConfig
 from judo.tasks.particle import Particle, ParticleConfig
@@ -23,6 +24,7 @@ _registered_tasks: Dict[str, Tuple[Type[Task], Type[TaskConfig]]] = {
     "particle": (Particle, ParticleConfig),
     "pusht": (Pusht, PushtConfig),
     "humanoid_mocap": (HumanoidMocap, HumanoidMocapConfig),
+    "humanoid_standup": (HumanoidStandup, HumanoidStandupConfig),
 }
 
 
@@ -53,4 +55,12 @@ __all__ = [
     "LeapCubeConfig",
     "LeapCubeDown",
     "LeapCubeDownConfig",
+    "Particle",
+    "ParticleConfig",
+    "Pusht",
+    "PushtConfig",
+    "HumanoidMocap",
+    "HumanoidMocapConfig",
+    "HumanoidStandup",
+    "HumanoidStandupConfig",
 ]

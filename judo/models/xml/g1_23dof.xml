@@ -308,14 +308,27 @@
   <sensor>
     <gyro site="imu_in_torso" name="imu-torso-angular-velocity" cutoff="34.9" noise="0.0005" />
     <accelerometer site="imu_in_torso" name="imu-torso-linear-acceleration" cutoff="157" noise="0.01" />
+    <framepos name="imu_in_torso_position" objtype="site" objname="imu_in_torso" />
     <framequat name="imu_in_torso_quat" objtype="site" objname="imu_in_torso" />
     <framelinvel name="imu_in_torso_linvel" objtype="site" objname="imu_in_torso" />
     <gyro site="imu_in_pelvis" name="imu-pelvis-angular-velocity" cutoff="34.9" noise="0.0005" />
     <accelerometer site="imu_in_pelvis" name="imu-pelvis-linear-acceleration" cutoff="157" noise="0.01" />
-
+    
     <framepos name="left_foot_position" objtype="site" objname="left_foot" />
     <framequat name="left_foot_orientation" objtype="site" objname="left_foot" />
     <framepos name="right_foot_position" objtype="site" objname="right_foot" />
     <framequat name="right_foot_orientation" objtype="site" objname="right_foot" />
   </sensor>
+
+  <keyframe>
+    <key name="stand"
+      qpos="
+      0 0 0.825
+      1 0 0 0
+      0 0 0 0 0 0
+      0 0 0 0 0 0
+      0
+      0 0 0 0 0
+      0 0 0 0 0"/>
+  </keyframe>
 </mujoco>
