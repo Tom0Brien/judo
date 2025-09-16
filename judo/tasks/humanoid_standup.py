@@ -84,10 +84,7 @@ class HumanoidStandup(Task[HumanoidStandupConfig]):
         torso_position = sensors[..., torso_position_sensor_start : torso_position_sensor_start + 3]
         torso_height = torso_position[..., 2]
         target_height = config.target_height * np.ones_like(torso_height)
-        print(torso_height.shape)
-        print(target_height.shape)
         height_reward = -config.w_height * quadratic_norm(torso_height - target_height)
-        print(height_reward.shape)
 
         # Orientation tracking reward
         orientation_sensor_start = self.get_sensor_start_index("imu_in_torso_quat")
@@ -96,12 +93,8 @@ class HumanoidStandup(Task[HumanoidStandupConfig]):
 
         # Nominal joint configuration reward
         joints = states[..., :self.model.nq]
-        print("joints shape", joints.shape)
         joint_reward = -config.w_nominal * quadratic_norm(joints - self.qstand[:self.model.nq]).sum(-1)
          
-        # print(height_reward.shape)
-        # print(orientation_reward.shape)
-        # print(joint_reward.shape)
         assert height_reward.shape == (batch_size,)
         assert orientation_reward.shape == (batch_size,)
         assert joint_reward.shape == (batch_size,)
