@@ -17,9 +17,8 @@ from judo.optimizers.base import Optimizer, OptimizerConfig
 @dataclass
 class EvosaxConfig(OptimizerConfig):
     """Configuration for evosax-based optimizers."""
-
-    sigma: float = 0.1
     algorithm_name: Literal["CMA_ES", "OpenAI_ES", "xNES", "SNES", "RandomSearch", "SimulatedAnnealing", "PGPE", "ARS", "Sep_CMA_ES", "GradientlessDescent", "SAMR_GA", "SimpleGA", "DifferentialEvolution", "PSO"] = "SAMR_GA"
+    sigma: float = 0.1
     algorithm_kwargs: dict = field(default_factory=dict)
 
 
@@ -42,9 +41,27 @@ class Evosax(Optimizer[EvosaxConfig]):
             config: Configuration for the evosax optimizer
             nu: Number of control dimensions
         """
+        print("Initializing evosax optimizer")
+        
+        # Initialize config attribute to avoid issues during setup
+        self._config = config
+        
+        # Store the algorithm name to detect changes
+        self._current_algorithm_name = config.algorithm_name
+        
+        # Initialize the evosax strategy before calling super().__init__
+        # to avoid circular dependency with config setter
+        self._init_strategy(config, nu)
+        
+        # Call super().__init__ after strategy is initialized
         super().__init__(config, nu)
 
-        print("Initializing evosax optimizer")
+    def _init_strategy(self, config: EvosaxConfig = None, nu: int = None) -> None:
+        """Initialize or reinitialize the evosax strategy."""
+        if config is None:
+            config = self.config
+        if nu is None:
+            nu = self.nu
         
         # Initialize JAX random key
         self.rng_key = jax.random.PRNGKey(42)
@@ -90,6 +107,27 @@ class Evosax(Optimizer[EvosaxConfig]):
                 mean=initial_mean,
                 params=self.es_params
             )
+
+    @property
+    def config(self) -> EvosaxConfig:
+        """Get the current config."""
+        return self._config
+
+    @config.setter
+    def config(self, new_config: EvosaxConfig) -> None:
+        """Set the config and reinitialize strategy if algorithm changed."""
+        old_algorithm = getattr(self, '_current_algorithm_name', None)
+        
+        # Update the config
+        self._config = new_config
+        
+        # Check if algorithm changed and if we're not in initial setup
+        if (old_algorithm is not None and 
+            old_algorithm != new_config.algorithm_name and 
+            hasattr(self, 'nu')):
+            print(f"Algorithm changed from {old_algorithm} to {new_config.algorithm_name}, reinitializing...")
+            self._current_algorithm_name = new_config.algorithm_name
+            self._init_strategy(new_config, self.nu)
 
     def _get_algorithm_class(self, algorithm_name: str) -> Type[EvolutionaryAlgorithm]:
         """Get the evosax algorithm class by name.
