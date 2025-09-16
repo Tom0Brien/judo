@@ -14,7 +14,7 @@ from judo.optimizers.overrides import (
     set_default_leap_cube_overrides,
 )
 from judo.optimizers.ps import PredictiveSampling, PredictiveSamplingConfig
-
+from judo.optimizers.ambs import AMBS, AMBSConfig
 set_default_caltech_leap_cube_overrides()
 set_default_cartpole_overrides()
 set_default_cylinder_push_overrides()
@@ -26,6 +26,7 @@ _registered_optimizers: dict[str, tuple[Type[Optimizer], Type[OptimizerConfig]]]
     "cem": (CrossEntropyMethod, CrossEntropyMethodConfig),
     "mppi": (MPPI, MPPIConfig),
     "ps": (PredictiveSampling, PredictiveSamplingConfig),
+    "ambs": (AMBS, AMBSConfig),
 }
 
 
@@ -54,4 +55,6 @@ __all__ = [
     "OptimizerConfig",
     "PredictiveSampling",
     "PredictiveSamplingConfig",
+    "AMBS",
+    "AMBSConfig",
 ]
