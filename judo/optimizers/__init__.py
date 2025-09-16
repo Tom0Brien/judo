@@ -15,6 +15,7 @@ from judo.optimizers.overrides import (
 )
 from judo.optimizers.ps import PredictiveSampling, PredictiveSamplingConfig
 from judo.optimizers.ambs import AMBS, AMBSConfig
+from judo.optimizers.evosax import Evosax, EvosaxConfig
 set_default_caltech_leap_cube_overrides()
 set_default_cartpole_overrides()
 set_default_cylinder_push_overrides()
@@ -27,6 +28,7 @@ _registered_optimizers: dict[str, tuple[Type[Optimizer], Type[OptimizerConfig]]]
     "mppi": (MPPI, MPPIConfig),
     "ps": (PredictiveSampling, PredictiveSamplingConfig),
     "ambs": (AMBS, AMBSConfig),
+    "evosax": (Evosax, EvosaxConfig),
 }
 
 
@@ -57,4 +59,6 @@ __all__ = [
     "PredictiveSamplingConfig",
     "AMBS",
     "AMBSConfig",
+    "Evosax",
+    "EvosaxConfig",
 ]
