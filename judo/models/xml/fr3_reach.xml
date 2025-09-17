@@ -1,0 +1,40 @@
+<!-- FR3 Reach Task -->
+<mujoco model="fr3_reach">
+  <!-- Include FR3 components -->
+  <include file="fr3_components/assets.xml"/>
+  <include file="fr3_reach_params.xml"/>
+
+  <asset>
+    <!-- Target sphere material -->
+    <material name="target_material" rgba="0.2 0.8 0.2 0.8"/>
+  </asset>
+
+  <worldbody>
+
+    <site name="reference" pos="0.0 0.0 0.0" 	euler="0 0 0.0" size="0.01" rgba="1 0 0 0"/>
+    <!-- Floor -->
+    <geom name="ground" type="plane" size="2 2 0.01" rgba="0.8 0.8 0.8 1" friction="1 0.1 0.1"/>
+    <!-- Target (mocap body for interactive control) -->
+    <body name="target" mocap="true" pos="0.6 0.2 0.6">
+      <geom name="target_sphere" type="sphere" size="0.03" material="target_material" contype="0" conaffinity="0" group="2"/>
+      <site name="target_site" size="0.001" rgba="0.2 0.8 0.2 1"/>
+    </body>
+
+    <!-- FR3 Robot -->
+    <include file="fr3_components/fr3.xml"/>
+  </worldbody>
+
+  <sensor>
+    <!-- Gripper position relative to target -->
+    <framepos name="gripper_position" objtype="site" objname="grasp_site"/>
+    
+    <!-- Gripper orientation -->
+    <framequat name="gripper_orientation" objtype="site" objname="grasp_site"/>
+    
+    <!-- Target position -->
+    <framepos name="target_position" objtype="site" objname="target_site"/>
+    
+    <!-- Target orientation -->
+    <framequat name="target_orientation" objtype="site" objname="target_site"/>
+  </sensor>
+</mujoco> 

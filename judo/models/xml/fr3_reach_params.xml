@@ -1,0 +1,85 @@
+<mujoco model="fr3_reach_params">
+  <compiler angle="radian"/>
+  <option integrator="implicitfast" timestep="0.004" impratio="10.0"/>
+
+  <default>
+    <default class="fr3">
+      <!-- Overwritten in joints 5, 6, and 7. -->
+     <material specular="0.5" shininess="0.25"/>
+      <joint armature="0.1" damping="1" axis="0 0 1" range="-2.8973 2.8973"/>
+      <general dyntype="none" biastype="affine" ctrlrange="-2.8973 2.8973" forcerange="-87 87"/>
+      <position forcerange="-100 100"/>
+
+      <!-- constraint stiffness -->
+      <geom solimp="0.98 0.99 0.01 0.001 1" solref="0.001 1" friction=".5"/>
+
+      <default class="finger">
+        <joint axis="0 1 0" type="slide" range="0 0.04"/>
+      </default>
+
+      <default class="visual">
+        <geom type="mesh" group="2" contype="0" conaffinity="0"/>
+      </default>
+      <default class="collision">
+        <geom type="mesh" group="3" mass="0" density="0"/>
+        <default class="fingertip_pad_collision_1">
+          <geom type="box" size="0.0085 0.004 0.0085" pos="0 0.0055 0.0445"/>
+        </default>
+        <default class="fingertip_pad_collision_2">
+          <geom type="box" size="0.003 0.002 0.003" pos="0.0055 0.002 0.05"/>
+        </default>
+        <default class="fingertip_pad_collision_3">
+          <geom type="box" size="0.003 0.002 0.003" pos="-0.0055 0.002 0.05"/>
+        </default>
+        <default class="fingertip_pad_collision_4">
+          <geom type="box" size="0.003 0.002 0.0035" pos="0.0055 0.002 0.0395"/>
+        </default>
+        <default class="fingertip_pad_collision_5">
+          <geom type="box" size="0.003 0.002 0.0035" pos="-0.0055 0.002 0.0395"/>
+        </default>
+      </default>
+      <site size="0.001" rgba="0.5 0.5 0.5 0.3" group="4"/>
+    </default>
+    <default class="translation">
+      <position kp="200" kv="100" ctrlrange="-1 1"/>
+    </default>
+    <default class="rotation">
+      <!--
+      Note that the rotational control range is purposefully limited to (-pi/2, pi/2) to avoid the
+      documented instabillity near pi, which is due to taking quaternion differences.
+      Increase this range to pi or bigger in order to see the instabillity.
+      See here for more details https://mujoco.readthedocs.io/en/latest/XMLreference.html#actuator
+      -->
+      <position kp="30" kv="20" ctrlrange="-3.14 3.14"/>
+    </default>
+    <!--
+    Clamping the total actuator torque at the joints means that the motion produced by the Cartesian
+    commands is achievable by individual joint actuators with the specified torque limits.
+    See https://mujoco.readthedocs.io/en/latest//modeling.html#actuator-force-clamping
+    -->
+    <joint armature="0" damping="0" stiffness="0" actuatorfrcrange="-1 1" actuatorgravcomp="true"/>
+    <site type="box" size=".012 .012 .012" rgba=".7 .7 .8 1"/>
+  </default>
+
+  <equality>
+    <joint joint1="finger_joint1" joint2="finger_joint2" polycoef="0 1"/>
+  </equality>
+
+  <actuator>
+    <position name="x"  site="grasp_site" refsite="reference" gear="1 0 0 0 0 0" class="translation"/>
+    <position name="y"  site="grasp_site" refsite="reference" gear="0 1 0 0 0 0" class="translation"/>
+    <position name="z"  site="grasp_site" refsite="reference" gear="0 0 1 0 0 0" class="translation"/>
+    <position name="rx" site="grasp_site" refsite="reference" gear="0 0 0 1 0 0" class="rotation"/>
+    <position name="ry" site="grasp_site" refsite="reference" gear="0 0 0 0 1 0" class="rotation"/>
+    <position name="rz" site="grasp_site" refsite="reference" gear="0 0 0 0 0 1" class="rotation"/>
+  </actuator>
+
+  <sensor>
+
+    <!-- sensors for the arm/hand -->
+    <framezaxis name="ee_z" objtype="body" objname="hand"/>
+
+    <!-- traces -->
+    <framepos name="trace_grasp_site" objtype="site" objname="grasp_site"/>
+  </sensor>
+</mujoco> 

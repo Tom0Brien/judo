@@ -1,4 +1,4 @@
-<mujoco model="cylinder_push">
+<mujoco model="box_push">
   <option timestep="0.02" />
 
   <asset>
@@ -27,7 +27,7 @@
     <body name="cart" pos="0 0 0">
       <joint name="slider_cart_x" damping="4" type="slide" axis="1 0 0" />
       <joint name="slider_cart_y" damping="4" type="slide" axis="0 1 0" />
-      <geom name="cart" type="cylinder" size="0.25 0.1" mass="1" rgba=".1 .5 .5 1" friction="0"/>
+      <geom name="cart" type="box" size="0.15 0.15 0.1" mass="1" rgba=".1 .5 .5 1" friction="0"/>
       <site pos="0 0 0.15" name="cart_site"/>
     </body>
   </worldbody>
@@ -42,4 +42,4 @@
     <framepos name="trace_cart" objtype="site" objname="cart_site"/>
   </sensor>
 
-</mujoco>
+</mujoco> 

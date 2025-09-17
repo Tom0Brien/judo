@@ -12,13 +12,13 @@ from judo.tasks.base import Task, TaskConfig
 from judo.tasks.cost_functions import quadratic_norm
 from judo.utils.fields import np_1d_field
 
-XML_PATH = str(MODEL_PATH / "xml/cylinder_push.xml")
+XML_PATH = str(MODEL_PATH / "xml/box_push.xml")
 
 
 @slider("w_pusher_proximity", 0.0, 5.0, 0.1)
 @dataclass
-class CylinderPushConfig(TaskConfig):
-    """Reward configuration for the cylinder push task."""
+class BoxPushConfig(TaskConfig):
+    """Reward configuration for the box push task."""
 
     w_pusher_proximity: float = 0.5
     w_pusher_velocity: float = 0.0
@@ -36,11 +36,11 @@ class CylinderPushConfig(TaskConfig):
     )
 
 
-class CylinderPush(Task[CylinderPushConfig]):
-    """Defines the cylinder push balancing task."""
+class BoxPush(Task[BoxPushConfig]):
+    """Defines the box push balancing task."""
 
     def __init__(self, model_path: str = XML_PATH, sim_model_path: str | None = None) -> None:
-        """Initializes the cylinder push task."""
+        """Initializes the box push task."""
         super().__init__(model_path, sim_model_path=sim_model_path)
         self.reset()
 
@@ -49,14 +49,14 @@ class CylinderPush(Task[CylinderPushConfig]):
         states: np.ndarray,
         sensors: np.ndarray,
         controls: np.ndarray,
-        config: CylinderPushConfig,
+        config: BoxPushConfig,
         system_metadata: dict[str, Any] | None = None,
     ) -> np.ndarray:
-        """Implements the cylinder push reward from MJPC.
+        """Implements the box push reward from MJPC.
 
         Maps a list of states, list of controls, to a batch of rewards (summed over time) for each rollout.
 
-        The cylinder push reward has four terms:
+        The box push reward has four terms:
             * `pusher_reward`, penalizing the distance between the pusher and the cart.
             * `velocity_reward` penalizing squared linear velocity of the pusher.
             * `goal_reward`, penalizing the distance from the cart to the goal.
