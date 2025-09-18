@@ -1,0 +1,58 @@
+<mujoco model="t_push">
+  <option timestep="0.02" />
+
+  <asset>
+    <texture name="blue_grid" type="2d" builtin="checker" rgb1=".02 .14 .44" rgb2=".27 .55 1" width="300" height="300" mark="edge" markrgb="1 1 1"/>
+    <material name="blue_grid" texture="blue_grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
+  </asset>
+
+  <default>
+    <default class="slider">
+      <position kp="10" ctrlrange="-10 10" forcerange="-1000 1000"/>
+    </default>
+  </default>
+
+  <worldbody>
+    <body>
+      <geom mass="0" name="floor" pos="0 0 -0.25" condim="3" size="10.0 10.0 0.10" rgba="0 1 1 1" type="box" material="blue_grid"/>
+    </body>
+
+    <body name="pusher" pos="0 0 0">
+      <joint name="slider_x" damping="4" type="slide" axis="1 0 0" />
+      <joint name="slider_y" damping="4" type="slide" axis="0 1 0" />
+      <geom name="pusher" type="cylinder" size="0.1 0.1" mass="1" rgba=".9 .5 .5 1" friction="0"/>
+      <site pos="0 0 0.15" name="pusher_site"/>
+    </body>
+
+    <body name="t_block" pos="0 0 0">
+      <joint name="slider_t_x" damping="4" type="slide" axis="1 0 0" />
+      <joint name="slider_t_y" damping="4" type="slide" axis="0 1 0" />
+      <joint name="t_rotation" damping="1" type="hinge" axis="0 0 1" />
+      <!-- T-shaped block composed of two boxes -->
+      <!-- Horizontal bar of the T -->
+      <geom name="t_horizontal" type="box" size="0.25 0.075 0.1" pos="0 0 0" mass="0.6" rgba=".1 .5 .5 1" friction="0"/>
+      <!-- Vertical bar of the T -->
+      <geom name="t_vertical" type="box" size="0.075 0.2 0.1" pos="0 -0.125 0" mass="0.4" rgba=".1 .5 .5 1" friction="0"/>
+      <site pos="0 0 0.15" name="t_block_site"/>
+    </body>
+
+    <body name="goal" mocap="true" pos="0 0 0">
+      <!-- Goal visualization showing T-shape -->
+      <geom name="goal_horizontal" type="box" size="0.25 0.075 0.1" pos="0 0 0" contype="0" conaffinity="0" rgba="0 1 0 0.3" />
+      <geom name="goal_vertical" type="box" size="0.075 0.2 0.1" pos="0 -0.125 0" contype="0" conaffinity="0" rgba="0 1 0 0.3" />
+      <site pos="0 0 0.15" name="goal_site"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <velocity name="actuator_pusher_x" joint="slider_x" class="slider" />
+    <velocity name="actuator_pusher_y" joint="slider_y" class="slider" />
+  </actuator>
+
+  <sensor>
+    <framepos name="trace_pusher" objtype="site" objname="pusher_site"/>
+    <framepos name="trace_t_block" objtype="site" objname="t_block_site"/>
+    <framequat name="t_block_orientation" objtype="body" objname="t_block"/>
+  </sensor>
+
+</mujoco> 

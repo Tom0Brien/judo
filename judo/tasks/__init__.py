@@ -15,6 +15,7 @@ from judo.tasks.leap_cube import LeapCube, LeapCubeConfig
 from judo.tasks.leap_cube_down import LeapCubeDown, LeapCubeDownConfig
 from judo.tasks.particle import Particle, ParticleConfig
 from judo.tasks.pusht import Pusht, PushtConfig
+from judo.tasks.t_push import TPush, TPushConfig
 
 _registered_tasks: Dict[str, Tuple[Type[Task], Type[TaskConfig]]] = {
     "box_push": (BoxPush, BoxPushConfig),
@@ -27,6 +28,7 @@ _registered_tasks: Dict[str, Tuple[Type[Task], Type[TaskConfig]]] = {
     "caltech_leap_cube": (CaltechLeapCube, CaltechLeapCubeConfig),
     "particle": (Particle, ParticleConfig),
     "pusht": (Pusht, PushtConfig),
+    "t_push": (TPush, TPushConfig),
     "humanoid_mocap": (HumanoidMocap, HumanoidMocapConfig),
     "humanoid_standup": (HumanoidStandup, HumanoidStandupConfig),
 }
@@ -67,6 +69,8 @@ __all__ = [
     "ParticleConfig",
     "Pusht",
     "PushtConfig",
+    "TPush",
+    "TPushConfig",
     "HumanoidMocap",
     "HumanoidMocapConfig",
     "HumanoidStandup",
