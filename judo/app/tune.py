@@ -232,8 +232,9 @@ class TunerNode(DoraNode):
             params["temperature"] = trial.suggest_float("temperature", 0.001, 2.0, log=True)
 
         elif self.target_optimizer == "cem":
-            params["sigma_min"] = trial.suggest_float("sigma_min", 0.01, 0.5, log=True)
-            params["sigma_max"] = trial.suggest_float("sigma_max", 0.1, 2.0, log=True)
+            # Sample sigma_min first, then sigma_max to ensure sigma_min <= sigma_max
+            params["sigma_min"] = trial.suggest_float("sigma_min", 0.01, 2.0, log=True)
+            params["sigma_max"] = trial.suggest_float("sigma_max", params["sigma_min"], 2.0, log=True)
             params["num_elites"] = trial.suggest_int("num_elites", 1, 16)
 
         elif self.target_optimizer == "ps":

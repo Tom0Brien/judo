@@ -92,6 +92,6 @@ class CylinderPush(Task[CylinderPushConfig]):
 
     def reset(self) -> None:
         """Resets the model to a default state."""
-        self.data.qpos = np.array([3, 2, 2, 0.0])
+        self.data.qpos = np.array([3, 1, 2, 0.0])
         self.data.qvel = np.zeros(4)
         mujoco.mj_forward(self.model, self.data) 

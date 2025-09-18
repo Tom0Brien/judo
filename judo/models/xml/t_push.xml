@@ -1,5 +1,7 @@
 <mujoco model="t_push">
-  <option timestep="0.02" />
+  <option timestep="0.02" iterations="1" ls_iterations="5">
+    <flag eulerdamp="disable" />
+  </option>
 
   <asset>
     <texture name="blue_grid" type="2d" builtin="checker" rgb1=".02 .14 .44" rgb2=".27 .55 1" width="300" height="300" mark="edge" markrgb="1 1 1"/>
@@ -34,13 +36,6 @@
       <!-- Vertical bar of the T -->
       <geom name="t_vertical" type="box" size="0.075 0.2 0.1" pos="0 -0.125 0" mass="0.4" rgba=".1 .5 .5 1" friction="0"/>
       <site pos="0 0 0.15" name="t_block_site"/>
-    </body>
-
-    <body name="goal" mocap="true" pos="0 0 0">
-      <!-- Goal visualization showing T-shape -->
-      <geom name="goal_horizontal" type="box" size="0.25 0.075 0.1" pos="0 0 0" contype="0" conaffinity="0" rgba="0 1 0 0.3" />
-      <geom name="goal_vertical" type="box" size="0.075 0.2 0.1" pos="0 -0.125 0" contype="0" conaffinity="0" rgba="0 1 0 0.3" />
-      <site pos="0 0 0.15" name="goal_site"/>
     </body>
   </worldbody>
 

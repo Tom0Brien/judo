@@ -102,26 +102,9 @@ class TPush(Task[TPushConfig]):
         assert orientation_reward.shape == (batch_size,)
 
         return pusher_reward + velocity_reward + goal_reward + orientation_reward
-    
-    def pre_rollout(self, curr_state: np.ndarray, config: TPushConfig) -> None:
-        """Update mocap target position and orientation before rollout."""
-        # Update target position and orientation in mocap body
-        if hasattr(self.data, "mocap_pos") and len(self.data.mocap_pos) > 0:
-            # Set 3D position (goal_pos is 2D, so we set z=0)
-            self.data.mocap_pos[0] = np.array([config.goal_pos[0], config.goal_pos[1], 0.0])
-            
-            # Convert goal orientation (angle) to quaternion [w, x, y, z]
-            # For rotation around z-axis: [cos(θ/2), 0, 0, sin(θ/2)]
-            half_angle = config.goal_orientation / 2.0
-            self.data.mocap_quat[0] = np.array([
-                np.cos(half_angle),  # w
-                0.0,                 # x
-                0.0,                 # y
-                np.sin(half_angle)   # z
-            ])
 
     def reset(self) -> None:
         """Resets the model to a default state."""
-        self.data.qpos = np.array([3, 2, 2, 0.0, 0.0])  # [pusher_x, pusher_y, t_block_x, t_block_y, t_block_angle]
+        self.data.qpos = np.array([3, 1, 2, 0.0, 0.0])  # [pusher_x, pusher_y, t_block_x, t_block_y, t_block_angle]
         self.data.qvel = np.zeros(5)  # [pusher_vx, pusher_vy, t_block_vx, t_block_vy, t_block_angular_vel]
         mujoco.mj_forward(self.model, self.data) 

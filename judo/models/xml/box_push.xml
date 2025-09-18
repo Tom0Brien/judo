@@ -31,11 +31,6 @@
       <geom name="cart" type="box" size="0.15 0.15 0.1" mass="1" rgba=".1 .5 .5 1" friction="0"/>
       <site pos="0 0 0.15" name="cart_site"/>
     </body>
-
-    <body name="goal" mocap="true" pos="0 0 0">
-      <geom name="goal" type="box" size="0.15 0.15 0.1" contype="0" conaffinity="0" rgba="0 1 0 0.3" />
-      <site pos="0 0 0.15" name="goal_site"/>
-    </body>
   </worldbody>
 
   <actuator>

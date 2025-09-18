@@ -63,9 +63,9 @@ node_definitions:
     _target_: judo.app.tune.TunerNode
     node_id: tuner
     max_workers: null
-    n_trials: 1000
-    n_samples_per_trial: 100
-    target_tasks: [cylinder_push, box_push, pusht]
+    n_trials: 2
+    n_samples_per_trial: 200
+    target_tasks: [t_push, box_push, cylinder_push]
     target_optimizers: [ps, mppi, cem]
     objective: reward  # "plan_time", "reward", or "multiobjective"
     trial_duration: 10.0
