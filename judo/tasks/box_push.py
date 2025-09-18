@@ -16,6 +16,7 @@ XML_PATH = str(MODEL_PATH / "xml/box_push.xml")
 
 
 @slider("w_pusher_proximity", 0.0, 5.0, 0.1)
+@slider("w_cart_orientation", 0.0, 5.0, 0.1)
 @dataclass
 class BoxPushConfig(TaskConfig):
     """Reward configuration for the box push task."""
@@ -23,6 +24,7 @@ class BoxPushConfig(TaskConfig):
     w_pusher_proximity: float = 0.5
     w_pusher_velocity: float = 0.0
     w_cart_position: float = 0.1
+    w_cart_orientation: float = 0.8
     pusher_goal_offset: float = 0.25
     goal_pos: np.ndarray = np_1d_field(
         np.array([0.0, 0.0]),
@@ -34,6 +36,7 @@ class BoxPushConfig(TaskConfig):
         xyz_vis_indices=[0, 1, None],
         xyz_vis_defaults=[0.0, 0.0, 0.0],
     )
+    goal_orientation: float = 0.0  # Target orientation in radians
 
 
 class BoxPush(Task[BoxPushConfig]):
@@ -52,7 +55,7 @@ class BoxPush(Task[BoxPushConfig]):
         config: BoxPushConfig,
         system_metadata: dict[str, Any] | None = None,
     ) -> np.ndarray:
-        """Implements the box push reward from MJPC.
+        """Implements the box push reward from MJPC with orientation cost.
 
         Maps a list of states, list of controls, to a batch of rewards (summed over time) for each rollout.
 
@@ -60,14 +63,17 @@ class BoxPush(Task[BoxPushConfig]):
             * `pusher_reward`, penalizing the distance between the pusher and the cart.
             * `velocity_reward` penalizing squared linear velocity of the pusher.
             * `goal_reward`, penalizing the distance from the cart to the goal.
+            * `orientation_reward`, penalizing the orientation error of the cart.
 
         Since we return rewards, each penalty term is returned as negative. The max reward is zero.
         """
         batch_size = states.shape[0]
 
+        # Extract state components: [pusher_x, pusher_y, cart_x, cart_y, cart_angle, pusher_vx, pusher_vy, cart_vx, cart_vy, cart_angular_vel]
         pusher_pos = states[..., 0:2]
         cart_pos = states[..., 2:4]
-        pusher_vel = states[..., 4:6]
+        cart_angle = states[..., 4]
+        pusher_vel = states[..., 5:7]
         cart_goal = config.goal_pos[0:2]
 
         cart_to_goal = cart_goal - cart_pos
@@ -84,14 +90,40 @@ class BoxPush(Task[BoxPushConfig]):
         goal_proximity = quadratic_norm(cart_pos - cart_goal)
         goal_reward = -config.w_cart_position * goal_proximity.sum(-1)
 
+        # Orientation cost: penalize deviation from target orientation
+        angle_diff = cart_angle - config.goal_orientation
+        # Normalize angle difference to [-pi, pi]
+        angle_diff = np.arctan2(np.sin(angle_diff), np.cos(angle_diff))
+        orientation_reward = -config.w_cart_orientation * quadratic_norm(angle_diff)
+
         assert pusher_reward.shape == (batch_size,)
         assert velocity_reward.shape == (batch_size,)
         assert goal_reward.shape == (batch_size,)
+        assert orientation_reward.shape == (batch_size,)
 
-        return pusher_reward + velocity_reward + goal_reward
+        return pusher_reward + velocity_reward + goal_reward + orientation_reward
+    
+    def pre_rollout(self, curr_state: np.ndarray, config: BoxPushConfig) -> None:
+        """Update mocap target position and orientation before rollout."""
+        # Update target position and orientation in mocap body
+        if hasattr(self.data, "mocap_pos") and len(self.data.mocap_pos) > 0:
+
+            print(f"Updating mocap target position and orientation: {config.goal_pos} {config.goal_orientation}")
+            # Set 3D position (goal_pos is 2D, so we set z=0)
+            self.data.mocap_pos[0] = np.array([config.goal_pos[0], config.goal_pos[1], 0.0])
+            
+            # Convert goal orientation (angle) to quaternion [w, x, y, z]
+            # For rotation around z-axis: [cos(θ/2), 0, 0, sin(θ/2)]
+            half_angle = config.goal_orientation / 2.0
+            self.data.mocap_quat[0] = np.array([
+                np.cos(half_angle),  # w
+                0.0,                 # x
+                0.0,                 # y
+                np.sin(half_angle)   # z
+            ])
 
     def reset(self) -> None:
         """Resets the model to a default state."""
-        self.data.qpos = np.array([3, 2, 2, 0.0])
-        self.data.qvel = np.zeros(4)
+        self.data.qpos = np.array([3, 2, 2, 0.0, 0.0])  # [pusher_x, pusher_y, cart_x, cart_y, cart_angle]
+        self.data.qvel = np.zeros(5)  # [pusher_vx, pusher_vy, cart_vx, cart_vy, cart_angular_vel]
         mujoco.mj_forward(self.model, self.data) 
