@@ -39,6 +39,8 @@ dependencies = [
     "rich",  # for displaying tables in benchmarking
     "scipy",
     "viser>=1.0.0",
+    "jax[cuda12]>=0.4.35",
+    "evosax>=0.2.0",
 ]
 
 [project.urls]

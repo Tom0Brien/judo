@@ -65,9 +65,9 @@ node_definitions:
     max_workers: null
     n_trials: 1000
     n_samples_per_trial: 100
-    target_tasks: [particle, cartpole, pusht, leap_cube, fr3_pick]
+    target_tasks: [cylinder_push, box_push, pusht]
     target_optimizers: [ps, mppi, cem]
-    objective: multiobjective  # "plan_time", "reward", or "multiobjective"
+    objective: reward  # "plan_time", "reward", or "multiobjective"
     trial_duration: 10.0
     study_name: null
     storage: null

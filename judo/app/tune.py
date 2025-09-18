@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Literal, Union
 
 import numpy as np
 import optuna
+import optuna.visualization as vis
 import pyarrow as pa
 from dora_utils.dataclasses import from_arrow, to_arrow
 from dora_utils.node import DoraNode, on_event
@@ -89,6 +90,9 @@ class TunerNode(DoraNode):
         self.current_trial = None
         self.current_plan_times = []
         self.samples_collected = 0
+        
+        # store plan time stats for all trials (regardless of objective)
+        self.trial_plan_time_stats = []  # List of (mean, std) for each completed trial
 
         # trajectory tracking for reward calculation
         self.trial_start_time = None
@@ -115,6 +119,7 @@ class TunerNode(DoraNode):
             print("Mode: Multi-objective optimization (plan_time vs reward)")
         else:
             print(f"Mode: Single-objective optimization ({objective})")
+        print(f"Results and visualizations will be saved to: {self.results_dir}")
 
         # start processing the first pair
         self.start_next_pair()
@@ -158,6 +163,7 @@ class TunerNode(DoraNode):
         self.current_trial = None
         self.current_plan_times = []
         self.samples_collected = 0
+        self.trial_plan_time_stats = []
 
         # reset trajectory tracking
         self.trial_start_time = None
@@ -216,11 +222,9 @@ class TunerNode(DoraNode):
         params = {}
 
         # base optimizer parameters
-        params["num_rollouts"] = trial.suggest_int("num_rollouts", 8, 64, step=8)
-        params["num_nodes"] = trial.suggest_int("num_nodes", 3, 12)
-        params["use_noise_ramp"] = trial.suggest_categorical("use_noise_ramp", [True, False])
-        if params["use_noise_ramp"]:
-            params["noise_ramp"] = trial.suggest_float("noise_ramp", 0.5, 5.0)
+        params["num_rollouts"] = 64
+        params["num_nodes"] = 6
+        params["use_noise_ramp"] = False
 
         # optimizer-specific parameters
         if self.target_optimizer == "mppi":
@@ -229,8 +233,8 @@ class TunerNode(DoraNode):
 
         elif self.target_optimizer == "cem":
             params["sigma_min"] = trial.suggest_float("sigma_min", 0.01, 0.5, log=True)
-            params["sigma_max"] = trial.suggest_float("sigma_max", 0.5, 2.0, log=True)
-            params["num_elites"] = trial.suggest_int("num_elites", 1, min(8, params["num_rollouts"] // 2))
+            params["sigma_max"] = trial.suggest_float("sigma_max", 0.1, 2.0, log=True)
+            params["num_elites"] = trial.suggest_int("num_elites", 1, 16)
 
         elif self.target_optimizer == "ps":
             params["sigma"] = trial.suggest_float("sigma", 0.001, 1.0, log=True)
@@ -340,6 +344,9 @@ class TunerNode(DoraNode):
         # compute plan time metrics
         mean_plan_time = np.mean(self.current_plan_times)
         std_plan_time = np.std(self.current_plan_times)
+        
+        # store plan time stats for this trial (regardless of objective)
+        self.trial_plan_time_stats.append((mean_plan_time, std_plan_time))
 
         # compute reward metrics if trajectory data is available
         cumulative_reward = -1e12  # default fallback value
@@ -478,7 +485,26 @@ class TunerNode(DoraNode):
                     "parameters": best_trial.params,
                 }
 
-                results["note"] = "Individual plan_time tracking not available for single-objective reward optimization"
+                # Find best plan time from stored stats
+                if self.trial_plan_time_stats:
+                    best_plan_time_idx = np.argmin([stats[0] for stats in self.trial_plan_time_stats])
+                    best_plan_time_mean, best_plan_time_std = self.trial_plan_time_stats[best_plan_time_idx]
+                    best_plan_time_trial = completed_trials[best_plan_time_idx]
+                    
+                    results["best_plan_time_solution"] = {
+                        "plan_time": best_plan_time_mean,
+                        "plan_time_std": best_plan_time_std,
+                        "parameters": best_plan_time_trial.params,
+                    }
+                    
+                    # Also store overall plan time statistics
+                    all_plan_times = [stats[0] for stats in self.trial_plan_time_stats]
+                    results["plan_time_stats"] = {
+                        "mean": float(np.mean(all_plan_times)),
+                        "std": float(np.std(all_plan_times)),
+                        "min": float(np.min(all_plan_times)),
+                        "max": float(np.max(all_plan_times)),
+                    }
 
             # parameter importance
             try:
@@ -507,6 +533,322 @@ class TunerNode(DoraNode):
                 print(f"  Best plan time: {best_plan_time['plan_time']:.4f}s (reward: {best_plan_time['reward']:.4f})")
         else:
             print(f"  Best value: {best_trial.value:.4f}")
+            
+            # Show plan time information for reward optimization
+            if self.objective == "reward" and "best_plan_time_solution" in results:
+                best_plan_time = results["best_plan_time_solution"]
+                print(f"  Best plan time: {best_plan_time['plan_time']:.4f}s ± {best_plan_time['plan_time_std']:.4f}s")
+                
+                if "plan_time_stats" in results:
+                    stats = results["plan_time_stats"]
+                    print(f"  Plan time stats: mean={stats['mean']:.4f}s, std={stats['std']:.4f}s, min={stats['min']:.4f}s, max={stats['max']:.4f}s")
+
+        # Generate and save visualizations
+        self.save_visualizations()
+        
+        # Extract and save trial data for custom analysis
+        self.save_trial_data()
+        
+        # Create custom visualizations
+        self.create_custom_plots()
+
+    def save_visualizations(self) -> None:
+        """Generate and save Optuna visualizations for the current study."""
+        if not self.study or len(self.study.trials) == 0:
+            print("No trials available for visualization")
+            return
+
+        pair_key = f"{self.target_task}_{self.target_optimizer}"
+        viz_dir = self.results_dir / f"{pair_key}_visualizations"
+        viz_dir.mkdir(exist_ok=True)
+
+        try:
+            # 1. Optimization History
+            if self.objective == "multiobjective":
+                # For multi-objective, show both objectives
+                fig = vis.plot_optimization_history(self.study, target=lambda t: t.values[0] if t.values else None, target_name="plan_time")
+                fig.write_html(str(viz_dir / "optimization_history_plan_time.html"))
+                
+                fig = vis.plot_optimization_history(self.study, target=lambda t: t.values[1] if t.values else None, target_name="reward")
+                fig.write_html(str(viz_dir / "optimization_history_reward.html"))
+            else:
+                fig = vis.plot_optimization_history(self.study)
+                fig.write_html(str(viz_dir / "optimization_history.html"))
+
+            # 2. Parameter Importance
+            try:
+                fig = vis.plot_param_importances(self.study)
+                fig.write_html(str(viz_dir / "param_importances.html"))
+            except Exception as e:
+                print(f"Could not generate parameter importance plot: {e}")
+
+            # 3. Parallel Coordinate Plot
+            try:
+                fig = vis.plot_parallel_coordinate(self.study)
+                fig.write_html(str(viz_dir / "parallel_coordinate.html"))
+            except Exception as e:
+                print(f"Could not generate parallel coordinate plot: {e}")
+
+            # 4. Slice Plot
+            try:
+                fig = vis.plot_slice(self.study)
+                fig.write_html(str(viz_dir / "slice_plot.html"))
+            except Exception as e:
+                print(f"Could not generate slice plot: {e}")
+
+            # 5. Contour Plot (for single objective only)
+            if self.objective != "multiobjective":
+                try:
+                    fig = vis.plot_contour(self.study)
+                    fig.write_html(str(viz_dir / "contour_plot.html"))
+                except Exception as e:
+                    print(f"Could not generate contour plot: {e}")
+
+            # 6. Pareto Front (for multi-objective only)
+            if self.objective == "multiobjective":
+                try:
+                    fig = vis.plot_pareto_front(self.study)
+                    fig.write_html(str(viz_dir / "pareto_front.html"))
+                except Exception as e:
+                    print(f"Could not generate Pareto front plot: {e}")
+
+            # 7. Trial Values vs Parameters
+            try:
+                fig = vis.plot_timeline(self.study)
+                fig.write_html(str(viz_dir / "timeline.html"))
+            except Exception as e:
+                print(f"Could not generate timeline plot: {e}")
+
+            print(f"  Visualizations saved to: {viz_dir}")
+
+        except Exception as e:
+            print(f"Error generating visualizations: {e}")
+
+    def save_trial_data(self) -> None:
+        """Extract and save trial data for custom analysis and visualization."""
+        if not self.study or len(self.study.trials) == 0:
+            print("No trials available for data extraction")
+            return
+
+        pair_key = f"{self.target_task}_{self.target_optimizer}"
+        data_dir = self.results_dir / f"{pair_key}_data"
+        data_dir.mkdir(exist_ok=True)
+
+        try:
+            # Extract trial data
+            trials_data = []
+            for trial in self.study.trials:
+                trial_data = {
+                    "trial_number": trial.number,
+                    "state": trial.state.name,
+                    "value": trial.value,
+                    "values": trial.values,  # For multi-objective
+                    "params": trial.params,
+                    "user_attrs": trial.user_attrs,
+                    "system_attrs": trial.system_attrs,
+                    "datetime_start": trial.datetime_start.isoformat() if trial.datetime_start else None,
+                    "datetime_complete": trial.datetime_complete.isoformat() if trial.datetime_complete else None,
+                }
+                trials_data.append(trial_data)
+
+            # Save as JSON
+            import json
+            with open(data_dir / "trials_data.json", "w") as f:
+                json.dump(trials_data, f, indent=2)
+
+            # Save as CSV for easy analysis
+            import pandas as pd
+            
+            # Flatten the data for CSV
+            csv_data = []
+            for trial_data in trials_data:
+                row = {
+                    "trial_number": trial_data["trial_number"],
+                    "state": trial_data["state"],
+                    "value": trial_data["value"],
+                    "datetime_start": trial_data["datetime_start"],
+                    "datetime_complete": trial_data["datetime_complete"],
+                }
+                
+                # Add parameters
+                for param, value in trial_data["params"].items():
+                    row[f"param_{param}"] = value
+                
+                # Add objective values (for multi-objective)
+                if trial_data["values"]:
+                    if len(trial_data["values"]) == 2:  # Multi-objective
+                        row["objective_plan_time"] = trial_data["values"][0]
+                        row["objective_reward"] = trial_data["values"][1]
+                    else:  # Single objective
+                        row["objective_value"] = trial_data["values"][0]
+                
+                csv_data.append(row)
+            
+            df = pd.DataFrame(csv_data)
+            df.to_csv(data_dir / "trials_data.csv", index=False)
+
+            # Save parameter importance data
+            try:
+                importance = optuna.importance.get_param_importances(self.study)
+                with open(data_dir / "param_importance.json", "w") as f:
+                    json.dump(importance, f, indent=2)
+            except Exception as e:
+                print(f"Could not extract parameter importance: {e}")
+
+            # Save study metadata
+            study_metadata = {
+                "study_name": self.study.study_name,
+                "direction": str(self.study.direction),
+                "directions": [str(d) for d in self.study.directions] if hasattr(self.study, 'directions') else None,
+                "n_trials": len(self.study.trials),
+                "best_trial_number": self.study.best_trial.number if self.study.best_trial else None,
+                "best_value": self.study.best_value,
+                "best_params": self.study.best_params,
+                "objective": self.objective,
+                "target_task": self.target_task,
+                "target_optimizer": self.target_optimizer,
+            }
+            
+            with open(data_dir / "study_metadata.json", "w") as f:
+                json.dump(study_metadata, f, indent=2)
+
+            print(f"  Trial data saved to: {data_dir}")
+            print(f"    - trials_data.json: Complete trial information")
+            print(f"    - trials_data.csv: Flattened data for analysis")
+            print(f"    - param_importance.json: Parameter importance scores")
+            print(f"    - study_metadata.json: Study configuration and best results")
+
+        except Exception as e:
+            print(f"Error saving trial data: {e}")
+
+    def create_custom_plots(self) -> None:
+        """Create custom visualizations using the extracted data."""
+        if not self.study or len(self.study.trials) == 0:
+            return
+
+        pair_key = f"{self.target_task}_{self.target_optimizer}"
+        data_dir = self.results_dir / f"{pair_key}_data"
+        viz_dir = self.results_dir / f"{pair_key}_visualizations"
+        
+        if not data_dir.exists():
+            print("No trial data available for custom plots")
+            return
+
+        try:
+            import pandas as pd
+            import plotly.graph_objects as go
+            import plotly.express as px
+            from plotly.subplots import make_subplots
+            
+            # Load the data
+            df = pd.read_csv(data_dir / "trials_data.csv")
+            
+            # 1. Custom optimization history with plan time stats
+            if self.objective == "reward" and "objective_value" in df.columns:
+                fig = go.Figure()
+                
+                # Add optimization history
+                fig.add_trace(go.Scatter(
+                    x=df["trial_number"],
+                    y=-df["objective_value"],  # Convert back from negative
+                    mode='lines+markers',
+                    name='Reward',
+                    line=dict(color='blue'),
+                    marker=dict(size=6)
+                ))
+                
+                fig.update_layout(
+                    title=f"Custom Optimization History - {self.target_task} + {self.target_optimizer}",
+                    xaxis_title="Trial Number",
+                    yaxis_title="Cumulative Reward",
+                    template="plotly_white",
+                    width=800,
+                    height=500
+                )
+                
+                fig.write_html(str(viz_dir / "custom_optimization_history.html"))
+            
+            # 2. Parameter distribution plots
+            param_cols = [col for col in df.columns if col.startswith("param_")]
+            if param_cols:
+                n_params = len(param_cols)
+                cols = min(3, n_params)
+                rows = (n_params + cols - 1) // cols
+                
+                fig = make_subplots(
+                    rows=rows, cols=cols,
+                    subplot_titles=[col.replace("param_", "") for col in param_cols]
+                )
+                
+                for i, param_col in enumerate(param_cols):
+                    row = i // cols + 1
+                    col = i % cols + 1
+                    
+                    fig.add_trace(
+                        go.Histogram(
+                            x=df[param_col],
+                            name=param_col.replace("param_", ""),
+                            showlegend=False
+                        ),
+                        row=row, col=col
+                    )
+                
+                fig.update_layout(
+                    title=f"Parameter Distributions - {self.target_task} + {self.target_optimizer}",
+                    template="plotly_white",
+                    width=1200,
+                    height=400 * rows
+                )
+                
+                fig.write_html(str(viz_dir / "custom_param_distributions.html"))
+            
+            # 3. Parameter vs Objective scatter plots
+            if param_cols and "objective_value" in df.columns:
+                n_params = len(param_cols)
+                cols = min(2, n_params)
+                rows = (n_params + cols - 1) // cols
+                
+                fig = make_subplots(
+                    rows=rows, cols=cols,
+                    subplot_titles=[f"{col.replace('param_', '')} vs Reward" for col in param_cols]
+                )
+                
+                for i, param_col in enumerate(param_cols):
+                    row = i // cols + 1
+                    col = i % cols + 1
+                    
+                    fig.add_trace(
+                        go.Scatter(
+                            x=df[param_col],
+                            y=-df["objective_value"],  # Convert back from negative
+                            mode='markers',
+                            name=param_col.replace("param_", ""),
+                            showlegend=False,
+                            marker=dict(
+                                size=8,
+                                color=df["trial_number"],
+                                colorscale="Viridis",
+                                showscale=(i == 0)
+                            )
+                        ),
+                        row=row, col=col
+                    )
+                
+                fig.update_layout(
+                    title=f"Parameter vs Objective - {self.target_task} + {self.target_optimizer}",
+                    template="plotly_white",
+                    width=1200,
+                    height=400 * rows
+                )
+                
+                fig.write_html(str(viz_dir / "custom_param_vs_objective.html"))
+            
+            print(f"  Custom plots saved to: {viz_dir}")
+            
+        except ImportError:
+            print("  Custom plots require pandas and plotly. Install with: pip install pandas plotly")
+        except Exception as e:
+            print(f"Error creating custom plots: {e}")
 
     def compute_cumulative_reward(self) -> float:
         """Compute the cumulative reward for the current trajectory."""
@@ -620,7 +962,10 @@ class TunerNode(DoraNode):
 
                 best_plan_time = results.get("best_plan_time_solution")
                 if best_plan_time:
-                    self.console.print(f"  Best plan time achieved: {best_plan_time['plan_time']:.4f}s")
+                    if self.objective == "reward" and "plan_time_std" in best_plan_time:
+                        self.console.print(f"  Best plan time achieved: {best_plan_time['plan_time']:.4f}s ± {best_plan_time['plan_time_std']:.4f}s")
+                    else:
+                        self.console.print(f"  Best plan time achieved: {best_plan_time['plan_time']:.4f}s")
 
                 # show top parameters
                 best_params = results.get("best_parameters", {})
@@ -702,5 +1047,25 @@ class TunerNode(DoraNode):
         self.console.print(f"\n[bold]Results saved to: {self.results_dir}[/bold]")
         self.console.print(f"  Combined results: {combined_file}")
         self.console.print(f"  Individual results: {self.results_dir}/*_results.json")
+        
+        # Show visualization and data information
+        viz_dirs = list(self.results_dir.glob("*_visualizations"))
+        data_dirs = list(self.results_dir.glob("*_data"))
+        
+        if viz_dirs:
+            self.console.print(f"  Visualizations: {len(viz_dirs)} directories with HTML plots")
+            for viz_dir in viz_dirs:
+                pair_name = viz_dir.name.replace("_visualizations", "")
+                self.console.print(f"    {pair_name}: {viz_dir}")
+        else:
+            self.console.print("  Visualizations: None generated")
+            
+        if data_dirs:
+            self.console.print(f"  Trial Data: {len(data_dirs)} directories with raw data")
+            for data_dir in data_dirs:
+                pair_name = data_dir.name.replace("_data", "")
+                self.console.print(f"    {pair_name}: {data_dir}")
+        else:
+            self.console.print("  Trial Data: None extracted")
 
         print("\nMulti-pair hyperparameter tuning complete! You may terminate the stack.")
